@@ -275,7 +275,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
 
 
 ### 2.3. Agent Workflow (Orchestrator)
-*Implementation: **LangGraph**. A strict, deterministic flow is required (Rephrase -> Search -> Rank -> Synthesize), not a loose "crew" of chatting agents. The state object must carry the structured UI inputs throughout the chain*
+*Implementation: **LangGraph**. A strict, deterministic flow is required (Validate -> Rephrase -> Search -> Rank -> Synthesize), not a loose "crew" of chatting agents. The state object must carry the structured UI inputs throughout the chain*
 
 
 #### Node 1: Intent Validator (LLM)
