@@ -1,0 +1,27 @@
+# --- Core API + UI ---
+fastapi[standard]>=0.128.0,<1.0.0  # FastAPI + uvicorn + common extras
+streamlit>=1.54.0,<2.0.0
+
+# --- Data / DB ---
+SQLAlchemy>=2.0.0,<3.0.0
+psycopg[binary,pool]>=3.2.0,<4.0.0 # Psycopg 3 has Python 3.13 binary packages
+pgvector>=0.3.0,<1.0.0             # Python client helpers for pgvector (vector column ops)
+
+# --- Schemas / settings ---
+pydantic>=2.8.0,<3.0.0             # <2.8.0 can fail on Python 3.13 due to pydantic-core
+python-dotenv>=1.0.0,<2.0.0
+
+# --- Ingestion / validation / utilities ---
+pandas>=2.2.0,<3.0.0
+numpy>=2.0.0,<3.0.0
+PyYAML>=6.0.0,<7.0.0
+httpx>=0.27.0,<1.0.0               # For making HTTP requests; supports async and sync
+tenacity>=8.2.0,<10.0.0            # For retrying API calls; supports async and sync
+rich>=13.0.0,<15.0.0               # For rich console output; supports Python 3.13
+
+# --- Orchestration ---
+langgraph>=1.0.0,<2.0.0
+
+# --- Embeddings (optional: only if you embed locally) ---
+# sentence-transformers>=5.2.0,<6.0.0 # Requires Python >=3.10; classifier includes 3.13
+# torch>=2.10.0,<3.0.0                # Classifier includes Python 3.13
