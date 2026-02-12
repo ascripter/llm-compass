@@ -56,6 +56,8 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
 | `name_normalized` | String | Standardized name (e.g., "MMLU") |
 | `variant` | String | Version or setting (e.g., "5-shot", "CoT") |
 | `description` | Text | Vectorized field describing what it measures |
+| `embedding_model_name` | Text | Name of the embedding model that vectorized `description` |
+| `embedding_model_version` | Text | Version of the embedding model that vectorized `description` |
 | `categories` | List<Str> | Tags (e.g., `["reasoning", "coding", "agentic"]`) |
 
 
@@ -320,12 +322,12 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
 - **Output:** `{ "search_queries": [...], "predicted_io_ratio": {...} }`
 
 #### Node 3: Benchmark Discovery (Tool)
-- **Input:** `search_queries` from Node 1.
+- **Input:** `search_queries` from Node 2.
 - **Task:** Execute `find_relevant_benchmarks`.
 - **Output:** `weighted_benchmarks: List[Dict]` (e.g., `[{"id": "mmlu", "weight": 0.9}, {"id": "gpqa", "weight": 0.8}]`).
 
 #### Node 4: Scoring & Ranking (Tool)
-- **Input:** `weighted_benchmarks` (from Node 2) + `constraints` and `predicted_io_ratio` (from Global State / Node 1).
+- **Input:** `weighted_benchmarks` (from Node 3) + `constraints` and `predicted_io_ratio` (from Global State / Node 2).
 - **Task:** Execute `retrieve_and_rank_models`.
 - **Logic:**
   - Fetch models.
