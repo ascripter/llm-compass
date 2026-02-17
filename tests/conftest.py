@@ -17,7 +17,7 @@ def session_fixture():
     )
 
     # Import Base from models to create tables
-    from src.data.models import Base
+    from llm_compass.data.models import Base
 
     Base.metadata.create_all(engine)
 

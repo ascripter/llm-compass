@@ -15,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.orm import DeclarativeBase, Mapped, col as col, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column as col, relationship
 
 from pgvector.sqlalchemy import Vector
 
