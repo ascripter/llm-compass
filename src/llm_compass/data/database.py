@@ -5,7 +5,7 @@ Req 1.2: Central access point for PostgreSQL + pgvector.
 
 import os
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from pgvector.psycopg import register_vector
 
 # Database URL from environment variable
@@ -23,6 +23,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 @event.listens_for(engine, "connect")
 def register_vector_type(dbapi_connection, connection_record):
+    print("postgres: vector type registered on new connection")
     register_vector(dbapi_connection)
 
 
@@ -40,7 +41,7 @@ def get_session():
 def init_db():
     """
     Creates tables if they don't exist.
-    Run this on startup.
+    Run this always on startup.
     """
     from .models import Base
 

@@ -1,0 +1,36 @@
+services:
+  # PostgreSQL database
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: llm_compass_db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: rootp4ssw3rd
+      POSTGRES_DB: database
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker-database-init.sql:/docker-entrypoint-initdb.d/init.sql  # optional: auto-run SQL on startup
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d database"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  # Python app
+  app:
+    build: .
+    container_name: llm_compass_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://admin:rootp4ssw3rd@postgres:5432/database
+      PYTHONPATH: /app/src
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: python -m llm_compass.app
+
+volumes:
+  postgres_data:
