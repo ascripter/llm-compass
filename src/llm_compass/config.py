@@ -6,6 +6,9 @@ application constants.
 """
 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env file if present
 
 # Database Connection String (PostgreSQL + pgvector)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/llm_benchmarks")
