@@ -3,7 +3,7 @@ Tests for Core Analysis Tools.
 Req 2.2: Verify search, filtering, and ranking logic.
 """
 
-from src.agentic_core.tools import find_relevant_benchmarks, retrieve_and_rank_models
+from llm_compass.agentic_core.tools import find_relevant_benchmarks, retrieve_and_rank_models
 
 
 def test_find_benchmarks_cutoff(session, mocker):
