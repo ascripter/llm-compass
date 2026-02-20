@@ -5,8 +5,10 @@ streamlit>=1.54.0,<2.0.0
 
 # --- Data / DB ---
 SQLAlchemy>=2.0.0,<3.0.0
-psycopg[binary,pool]>=3.2.0,<4.0.0 # Psycopg 3 has Python 3.13 binary packages
-pgvector>=0.3.0,<1.0.0             # Python client helpers for pgvector (vector column ops)
+# aiosqlite>=0.21.0,<1.0.0          # Needed only for SQLAlchemy AsyncEngine (proj. scaling): sqlite+aiosqlite://
+
+# --- Vector search ---
+faiss-cpu>=1.13.2,<2.0.0          # Has cp313 win_amd64 wheels on PyPI
 
 # --- Schemas / settings ---
 pydantic>=2.8.0,<3.0.0             # <2.8.0 can fail on Python 3.13 due to pydantic-core
