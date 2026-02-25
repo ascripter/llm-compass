@@ -154,6 +154,18 @@ class LLMMetadataSchema(BaseModel):
     def validate_modalities(cls, v):
         return _comma_separated_list_validator(v, Modality.__args__)
 
+    @classmethod
+    @field_validator("is_open_weights", "is_reasoning_model", "has_tool_calling", mode="before")
+    def validate_bool_fields(cls, v):
+        """Convert CSV boolean strings (TRUE/FALSE, 1/0, yes/no) to Python bool."""
+        if isinstance(v, str):
+            v = v.strip().upper()
+            if v in ("TRUE", "1", "YES"):
+                return True
+            elif v in ("FALSE", "0", "NO"):
+                return False
+        return bool(v)
+
 
 class BenchmarkScore(Base):
     """
@@ -187,8 +199,8 @@ class BenchmarkScoreSchema(BaseModel):
     """Pydantic schema for validating BenchmarkScore entries."""
 
     id: Optional[int] = None
-    model_id: int
-    benchmark_id: int
+    model_id: Optional[int] = None  # Optional during validation; to be filled after FK resolution
+    benchmark_id: Optional[int] = None  # Optional during validation; t.b.f. after FK resolution
     score_value: float
     metric_unit: str
     source_name: str
@@ -198,3 +210,19 @@ class BenchmarkScoreSchema(BaseModel):
     original_model_name: str
     original_benchmark_name: str
     original_benchmark_variant: Optional[str] = None
+
+    @classmethod
+    @field_validator("date_published", mode="before")
+    def validate_date_published(cls, v):
+        """Convert CSV date strings to datetime objects."""
+        if v is None or v == "":
+            return None
+        if isinstance(v, datetime):
+            return v
+        # Try common date formats
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d", "%Y/%m/%d %H:%M:%S"):
+            try:
+                return datetime.strptime(v, fmt)
+            except ValueError:
+                continue
+        raise ValueError(f"Unable to parse date: {v}")
