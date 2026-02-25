@@ -11,20 +11,31 @@ from sqlalchemy import (
     Float,
     Integer,
     String,
+    JSON,
     ForeignKey,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column as col, relationship
 
-from pgvector.sqlalchemy import Vector
+from pydantic import BaseModel, ValidationError, field_validator
 
-EMBED_MODEL_NAME = "qwen/qwen3-embedding-8b"
-EMBED_MODEL_VERSION = "openrouter"
-EMBED_DIM = 4096  # Qwen3-Embedding-8B default benchmark dimension
 
 Modality = Literal["text", "image", "audio", "video"]  # Extendable for future modalities
 SpeedClass = Literal["fast", "medium", "slow"]  # For categorizing model inference speed
+
+
+def _comma_separated_list_validator(v: str, allowed: Optional[tuple[str]] = None) -> list[str]:
+    """Pydantic validator to convert a comma-separated string into a list of strings."""
+    if isinstance(v, str):
+        out = [item.strip() for item in v.split(",") if item.strip()]
+    elif isinstance(v, list):
+        out = v
+    else:
+        raise ValidationError(f"Value must be a comma-separated list of strings: {v}")
+    for value in out:
+        if allowed and value not in allowed:
+            raise ValidationError(f"Value '{value}' is not in the allowed list: {allowed}")
+    return out
 
 
 class Base(DeclarativeBase):
@@ -41,23 +52,12 @@ class BenchmarkDictionary(Base):
 
     __tablename__ = "benchmark_dictionary"
 
-    id: Mapped[Optional[int]] = col(Integer, primary_key=True)
+    id: Mapped[int] = col(Integer, primary_key=True)  # FAISS index, required to be set a priori
     name_normalized: Mapped[str] = col(String, index=True, nullable=False)
     variant: Mapped[str] = col(String, default=None, nullable=True)
     # the (non-embedded) description string (English)
     description: Mapped[str] = col(String, nullable=False)
-    # Embedding for semantic search
-    description_embedding: Mapped[List[float]] = col(Vector(EMBED_DIM), nullable=False)
-    # To track which embedding model was used
-    embedding_model_name: Mapped[str] = col(String, default=EMBED_MODEL_NAME, nullable=False)
-    # For future-proofing against model updates
-    embedding_model_version: Mapped[str] = col(
-        String, default=EMBED_MODEL_VERSION, nullable=False
-    )
-    embedding_timestamp: Mapped[datetime] = col(
-        String, default=datetime.utcnow().isoformat(), nullable=False
-    )
-    categories: Mapped[List[str]] = col(ARRAY(String), default=[], nullable=False)
+    categories: Mapped[List[str]] = col(JSON, default=[], nullable=False)
 
     # Relationship to BenchmarkScore
     benchmark_scores: Mapped[List["BenchmarkScore"]] = relationship(back_populates="benchmark")
@@ -66,6 +66,21 @@ class BenchmarkDictionary(Base):
     __table_args__ = (
         UniqueConstraint("name_normalized", "variant", name="_name_variant_unique"),
     )
+
+
+class BenchmarkDictionarySchema(BaseModel):
+    """Pydantic schema for validating BenchmarkDictionary entries."""
+
+    id: int
+    name_normalized: str
+    variant: Optional[str] = None
+    description: str
+    categories: List[str]
+
+    @classmethod
+    @field_validator("categories", mode="before")
+    def validate_categories(cls, v: str) -> list[str]:
+        return _comma_separated_list_validator(v)
 
 
 class LLMMetadata(Base):
@@ -83,12 +98,12 @@ class LLMMetadata(Base):
     architecture: Mapped[Optional[str]] = col(String, nullable=True)  # e.g. "transformer"
     quantization: Mapped[Optional[str]] = col(String, nullable=True)  # e.g. "fp8", "q4_k_m"
     distillation_source: Mapped[Optional[str]] = col(String, nullable=True)  # if distilled
-    modality_input: Mapped[List[Modality]] = col(ARRAY(String), default=[], nullable=False)
-    modality_output: Mapped[List[Modality]] = col(ARRAY(String), default=[], nullable=False)
-    context_window: Mapped[Optional[int]] = col(Integer, nullable=False)
+    modality_input: Mapped[List[Modality]] = col(JSON, default=[], nullable=False)
+    modality_output: Mapped[List[Modality]] = col(JSON, default=[], nullable=False)
+    context_window: Mapped[int] = col(Integer, nullable=False)
     cost_input_1m: Mapped[float] = col(Float, nullable=False)
     cost_output_1m: Mapped[float] = col(Float, nullable=False)
-    speed_class: Mapped[Optional[SpeedClass]] = col(String, nullable=False)
+    speed_class: Mapped[SpeedClass] = col(String, nullable=False)
     speed_tps: Mapped[Optional[float]] = col(Float, nullable=True)
     is_open_weights: Mapped[bool] = col(Boolean, nullable=False)
     is_reasoning_model: Mapped[bool] = col(Boolean, nullable=False)
@@ -111,6 +126,35 @@ class LLMMetadata(Base):
     )
 
 
+class LLMMetadataSchema(BaseModel):
+    """Pydantic schema for validating LLMMetadata entries."""
+
+    id: Optional[int] = None
+    name_normalized: str
+    provider: str
+    parameter_count: Optional[int] = None
+    architecture: Optional[str] = None
+    quantization: Optional[str] = None
+    distillation_source: Optional[str] = None
+    modality_input: List[Modality] = []
+    modality_output: List[Modality] = []
+    context_window: int
+    cost_input_1m: float
+    cost_output_1m: float
+    speed_class: SpeedClass
+    speed_tps: Optional[float] = None
+    is_open_weights: bool
+    is_reasoning_model: bool
+    has_tool_calling: bool
+    is_outdated: bool = False
+    superseded_by_model_id: Optional[int] = None
+
+    @classmethod
+    @field_validator("modality_input", "modality_output", mode="before")
+    def validate_modalities(cls, v):
+        return _comma_separated_list_validator(v, Modality.__args__)
+
+
 class BenchmarkScore(Base):
     """
     The core repository of raw performance data.
@@ -124,15 +168,33 @@ class BenchmarkScore(Base):
     benchmark_id: Mapped[int] = col(
         Integer, ForeignKey("benchmark_dictionary.id"), nullable=False
     )
-    score_value: Mapped[float] = col(Float)
-    metric_unit: Mapped[str] = col(String, nullable=True)  # e.g. "%", "elo", "pass@1"
-    source_name: Mapped[Optional[str]] = col(String, nullable=True)  # e.g. "Hugging Face"
-    source_url: Mapped[Optional[str]] = col(String, nullable=True)
+    score_value: Mapped[float] = col(Float, nullable=False)
+    metric_unit: Mapped[str] = col(String, nullable=False)  # e.g. "%", "elo", "pass@1"
+    source_name: Mapped[str] = col(String, nullable=False)  # e.g. "vals.ai"
+    source_url: Mapped[str] = col(String, nullable=False)  # full url to source
     date_published: Mapped[Optional[datetime]] = col(DateTime, nullable=True)
     date_ingested: Mapped[datetime] = col(DateTime, default=datetime.utcnow, nullable=False)
     original_model_name: Mapped[str] = col(String, nullable=False)  # For audit (Req 1.3.A)
     original_benchmark_name: Mapped[str] = col(String, nullable=False)  # For audit (Req 1.3.A)
+    original_benchmark_variant: Mapped[str] = col(String, nullable=True)  # For audit (Req 1.3.A)
 
     # Relationships
     model: Mapped["LLMMetadata"] = relationship(back_populates="benchmark_scores")
     benchmark: Mapped["BenchmarkDictionary"] = relationship(back_populates="benchmark_scores")
+
+
+class BenchmarkScoreSchema(BaseModel):
+    """Pydantic schema for validating BenchmarkScore entries."""
+
+    id: Optional[int] = None
+    model_id: int
+    benchmark_id: int
+    score_value: float
+    metric_unit: str
+    source_name: str
+    source_url: str
+    date_published: Optional[datetime] = None
+    date_ingested: Optional[datetime] = None
+    original_model_name: str
+    original_benchmark_name: str
+    original_benchmark_variant: Optional[str] = None
