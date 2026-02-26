@@ -10,6 +10,8 @@ Build database initially via
 
 Will store data in `storage/` (depending on settings in `.env`)
 
+**NOTE:** FK resolution from scores to benchmark / models still t.b.d.
+
 To fetch data from SQLite:
 
 ```python
