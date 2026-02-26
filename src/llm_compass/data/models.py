@@ -87,12 +87,16 @@ class LLMMetadata(Base):
     """
     Stores static attributes for filtering and tradeoff analysis.
     Req 1.2.D: Tracks parameters, modality, and costs.
+    NOTE: `name_normalized` is unique, that means it potentially includes
+    parameter count, quantization or distillation info to distinguish between variants.
+    The corresponding columnns `parameter_count`, `quantization`, `distillation_source`
+    are still stored separately for filtering and analysis.
     """
 
     __tablename__ = "llm_metadata"
 
     id: Mapped[Optional[int]] = col(Integer, primary_key=True)
-    name_normalized: Mapped[str] = col(String, index=True, nullable=False)
+    name_normalized: Mapped[str] = col(String, index=True, nullable=False, unique=True)
     provider: Mapped[str] = col(String, nullable=False)  # e.g. "OpenAI", "Anthropic", "Meta"
     parameter_count: Mapped[Optional[int]] = col(Integer, nullable=True)
     architecture: Mapped[Optional[str]] = col(String, nullable=True)  # e.g. "transformer"
@@ -114,16 +118,6 @@ class LLMMetadata(Base):
     )
     # Relationship to BenchmarkScore
     benchmark_scores: Mapped[List["BenchmarkScore"]] = relationship(back_populates="model")
-
-    # Constraints
-    __table_args__ = (
-        UniqueConstraint(
-            "name_normalized",
-            "provider",
-            "quantization",
-            name="_name_provider_quantization_unique",
-        ),
-    )
 
 
 class LLMMetadataSchema(BaseModel):
