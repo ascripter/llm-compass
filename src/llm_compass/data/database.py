@@ -3,12 +3,9 @@ Database connection and session management.
 Req 1.2: Central access point for PostgreSQL + pgvector.
 """
 
-import os
-from typing import TYPE_CHECKING
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# if TYPE_CHECKING:
 from llm_compass.config import Settings
 
 
