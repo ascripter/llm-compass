@@ -71,15 +71,15 @@ class BenchmarkDictionary(Base):
 class BenchmarkDictionarySchema(BaseModel):
     """Pydantic schema for validating BenchmarkDictionary entries."""
 
-    id: int
+    id: Optional[int] = None  # Optional during validation
     name_normalized: str
     variant: Optional[str] = None
     description: str
     categories: List[str]
 
-    @classmethod
     @field_validator("categories", mode="before")
-    def validate_categories(cls, v: str) -> list[str]:
+    @staticmethod
+    def validate_categories(v: str) -> list[str]:
         return _comma_separated_list_validator(v)
 
 
@@ -123,7 +123,7 @@ class LLMMetadata(Base):
 class LLMMetadataSchema(BaseModel):
     """Pydantic schema for validating LLMMetadata entries."""
 
-    id: Optional[int] = None
+    id: Optional[int] = None  # Optional during validation
     name_normalized: str
     provider: str
     parameter_count: Optional[int] = None
@@ -143,20 +143,20 @@ class LLMMetadataSchema(BaseModel):
     is_outdated: bool = False
     superseded_by_model_id: Optional[int] = None
 
-    @classmethod
     @field_validator("modality_input", "modality_output", mode="before")
-    def validate_modalities(cls, v):
+    @staticmethod
+    def validate_modalities(v):
         return _comma_separated_list_validator(v, Modality.__args__)
 
-    @classmethod
     @field_validator("is_open_weights", "is_reasoning_model", "has_tool_calling", mode="before")
-    def validate_bool_fields(cls, v):
+    @staticmethod
+    def validate_bool_fields(v):
         """Convert CSV boolean strings (TRUE/FALSE, 1/0, yes/no) to Python bool."""
         if isinstance(v, str):
             v = v.strip().upper()
-            if v in ("TRUE", "1", "YES"):
+            if v in ("TRUE", "1", "YES", "T", "Y"):
                 return True
-            elif v in ("FALSE", "0", "NO"):
+            elif v in ("FALSE", "0", "NO", "F", "N"):
                 return False
         return bool(v)
 
@@ -192,7 +192,7 @@ class BenchmarkScore(Base):
 class BenchmarkScoreSchema(BaseModel):
     """Pydantic schema for validating BenchmarkScore entries."""
 
-    id: Optional[int] = None
+    id: Optional[int] = None  # optional during validation
     model_id: Optional[int] = None  # Optional during validation; to be filled after FK resolution
     benchmark_id: Optional[int] = None  # Optional during validation; t.b.f. after FK resolution
     score_value: float
