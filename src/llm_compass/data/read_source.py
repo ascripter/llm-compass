@@ -9,18 +9,16 @@ import csv
 import io
 from datetime import datetime
 from urllib.parse import urlparse
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import httpx
+from pydantic._internal._model_construction import ModelMetaclass
 
 from .models import (
     BenchmarkDictionarySchema,
     BenchmarkScoreSchema,
     LLMMetadataSchema,
 )
-
-if TYPE_CHECKING:
-    from pydantic._internal._model_construction import ModelMetaclass
 
 
 def _get_google_sheet_url(gid: int | str) -> str:
@@ -33,16 +31,19 @@ def _get_google_sheet_url(gid: int | str) -> str:
     return url
 
 
-def _fetch_url_as_csv_reader(url: str) -> csv.DictReader:
+def _fetch_url_as_csv_reader(url: str, skip_rows: int = 0) -> csv.DictReader:
     """Fetch CSV content from URL and parse with csv.DictReader.
 
     Returns:
         Iterator of dictionaries, one per row, with keys matching CSV headers.
     """
-    response = httpx.get(url, timeout=30.0)
+    response = httpx.get(url, timeout=30.0, follow_redirects=True)
     response.raise_for_status()
     csv_content = io.StringIO(response.text)
+    for _ in range(skip_rows):
+        next(csv_content)  # Skip rows if needed
     reader = csv.DictReader(csv_content)
+
     return reader
 
 
@@ -52,6 +53,9 @@ def _validate_rows(
     """Validate each row using the provided Pydantic model."""
     validated_rows = []
     for row in reader:
+        for k, v in row.items():
+            if v == "":
+                row[k] = None  # set empty strings to None for optional fields
         validated = validation_class(**row)
         validated_rows.append(validated.model_dump())
     return validated_rows
@@ -68,9 +72,9 @@ def benchmark_dictionary_from_googlesheet() -> list[dict[str, Any]]:
     rows = _validate_rows(reader, BenchmarkDictionarySchema)
 
     # Sort by name_normalized and variant
-    rows.sort(key=lambda x: (x["name_normalized"], x.get("variant", "")))
+    rows.sort(key=lambda x: (x["name_normalized"], x["variant"] or ""))
 
-    # Add designated FAISS index
+    # Add designated FAISS  and id for DB insertion
     for idx, record in enumerate(rows):
         record["id"] = idx
 
@@ -84,7 +88,7 @@ def llm_metadata_from_googlesheet() -> list[dict[str, Any]]:
         List of validated dictionaries ready for database insertion.
     """
     url = _get_google_sheet_url(gid=1019571654)
-    reader = _fetch_url_as_csv_reader(url)
+    reader = _fetch_url_as_csv_reader(url, skip_rows=1)  # Skip first row (header)
     rows = _validate_rows(reader, LLMMetadataSchema)
 
     # Sort by provider and name_normalized
