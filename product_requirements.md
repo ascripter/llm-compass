@@ -84,22 +84,35 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
 | Field | Type | Description |
 |-------|------|-------------|
 | `model_id` | UUID | Primary Key |
-| `name_normalized` | String | Standardized model name (e.g., "Llama 3 70B") |
+| `name_normalized` | String | Standardized model name (e.g., "llama-3.1-70b-instruct") |
+| `name_aliases` | List<Str> | List of alternative identifiers for the model |
+| `model_type` | String | Enum: `base`, `instruct`, `thinking` or `generator` |
 | `provider` | String | Company/Org (e.g., Meta, OpenAI, Mistral) |
+| `release_date` | Date | When the model was released |
 | `parameter_count` | Float | Parameters in Billions (e.g., 70.0). Nullable. |
 | `architecture` | String | Enum/String: `Dense`, `MoE`, `SSM` (e.g., Mamba), `RNN`. Nullable. |
-| `quantization` | String | e.g., `q4_k_m`, `fp16`, `int8`. Null for API models / unknown. |
+| `available_quantizations` | List<Str> | e.g., `q4_k_m`, `fp8`, `int8`. Null for API models / unknown. |
 | `distillation_source` | String | Stores parent model name if known (e.g., `GPT-4`). Nullable. |
 | `modality_input` | List<Str> | Capabilities (e.g., `["text", "image", "audio"]`) |
 | `modality_output` | List<Str> | Capabilities (e.g., `["text", "code"]`) |
-| `context_window` | Integer | Max input tokens |
-| `cost_input_1m` | Float | Price per 1M input tokens ($) |
-| `cost_output_1m` | Float | Price per 1M output tokens ($) |
-| `speed_class` | String | Enum: `fast` (>100 tps), `balanced` (30-100 tps), `slow` (<30 tps). |
-| `speed_tps` | Float | Average value (highly dependant on provider). Nullable. |
+| `context_window` | Integer | Max input tokens. Nullable. |
+| `max_output_tokens` | Integer | Max output tokens per query. Nullable. |
+| `cost_input_text_1m` | Float | Price per 1M input tokens of text ($). Nullable. |
+| `cost_output_text_1m` | Float | Price per 1M output tokens of text ($). Nullable. |
+| `cost_input_image_1k` | Float | Price per input image (1024 x 1024 pixels standard / medium quality) ($). Nullable. |
+| `cost_output_image_1k` | Float | Price per output image (1024 x 1024 pixels standard / medium quality) ($). Nullable. |
+| `cost_input_audio_1h` | Float | Price per hour of audio input ($). Nullable. |
+| `cost_output_audio_1h` | Float | Price per hour of audio output ($). Nullable. |
+| `cost_input_video_1s` | Float | Price per second of video input (standard / medium quality, HD resolution 1280 x 720 pixels) ($). Nullable. |
+| `cost_output_video_1s` | Float | Price per second of video output (standard / medium quality, HD resolution 1280 x 720 pixels) ($). Nullable. |
+| `raw_cost_notes_input` | String | Notes from LLM research (i.e on non-text modality pricing). Nullable. |
+| `raw_cost_notes_output` | String | Notes from LLM research (i.e on non-text modality pricing). Nullable. |
+| `speed_class` | String | Enum: `fast` (>100 tps), `medium` (40-100 tps), `slow` (<40 tps). |
+| `speed_tps` | Float | Approximate value (highly dependant on provider). Nullable. |
 | `is_open_weights` | Boolean | Whether this is an open weights model |
-| `is_reasoning_model`| Boolean | Whether this model has integrated reasoning capabilities |
-| `has_tool_calling` | Boolean | Whether the model has tool calling abilities (quality via relevant benchmarks) |
+| `license` | String | License under which the (open weights) model is distributed. Nullable. |
+| `reasoning_type`| String | Enum: `none`, `standard` (reason only when prompted), `native cot`(using Chain-of-Thought natively). Nullable. |
+| `tool_calling` | String | Enum: `none`, `standard` (JSON function calling), `agentic` (built-in native tools). Nullable. |
 | `is_outdated` | Boolean | Flag to hide superseded models (default: `false`) |
 | `superseded_by_model_id` | UUID | For models with `is_outdated=true`: Link to newer model version. Nullable |
 

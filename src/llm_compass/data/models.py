@@ -3,10 +3,11 @@ Defines the database schema using SQLAlchemy and pgvector.
 Maps directly to Product Requirements Section 1.2 (A, B, C, D).
 """
 
-from typing import List, Optional, Literal
-from datetime import datetime
+from typing import List, Optional, Literal, Any
+from datetime import date, datetime
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Float,
     Integer,
@@ -20,8 +21,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column as col, relati
 from pydantic import BaseModel, ValidationError, field_validator
 
 
+ModelType = Literal["base", "instruct", "thinking", "generator"]  # Extendable for future types
 Modality = Literal["text", "image", "audio", "video"]  # Extendable for future modalities
 SpeedClass = Literal["fast", "medium", "slow"]  # For categorizing model inference speed
+ReasoningType = Literal["none", "standard", "native cot"]  # For categorizing reasoning
+ToolCalling = Literal["none", "standard", "agentic"]  # For categorizing tool calling
 
 
 def _comma_separated_list_validator(v: str, allowed: Optional[tuple[str]] = None) -> list[str]:
@@ -97,21 +101,34 @@ class LLMMetadata(Base):
 
     id: Mapped[Optional[int]] = col(Integer, primary_key=True)
     name_normalized: Mapped[str] = col(String, index=True, nullable=False, unique=True)
+    name_aliases: Mapped[List[str]] = col(JSON, default=[], nullable=False)
+    model_type: Mapped[ModelType] = col(String, nullable=False)
     provider: Mapped[str] = col(String, nullable=False)  # e.g. "OpenAI", "Anthropic", "Meta"
-    parameter_count: Mapped[Optional[int]] = col(Integer, nullable=True)
-    architecture: Mapped[Optional[str]] = col(String, nullable=True)  # e.g. "transformer"
-    quantization: Mapped[Optional[str]] = col(String, nullable=True)  # e.g. "fp8", "q4_k_m"
+    release_date: Mapped[date] = col(Date, nullable=False)
+    parameter_count: Mapped[Optional[str]] = col(String, nullable=True)
+    architecture: Mapped[Optional[str]] = col(String, nullable=True)
+    available_quantizations: Mapped[List[str]] = col(JSON, default=[], nullable=False)
     distillation_source: Mapped[Optional[str]] = col(String, nullable=True)  # if distilled
     modality_input: Mapped[List[Modality]] = col(JSON, default=[], nullable=False)
     modality_output: Mapped[List[Modality]] = col(JSON, default=[], nullable=False)
-    context_window: Mapped[int] = col(Integer, nullable=False)
-    cost_input_1m: Mapped[float] = col(Float, nullable=False)
-    cost_output_1m: Mapped[float] = col(Float, nullable=False)
+    context_window: Mapped[Optional[int]] = col(Integer, nullable=True)
+    max_output_tokens: Mapped[Optional[int]] = col(Integer, nullable=True)
+    cost_input_text_1m: Mapped[Optional[float]] = col(Float, nullable=True)
+    cost_output_text_1m: Mapped[Optional[float]] = col(Float, nullable=True)
+    cost_input_image_1024: Mapped[Optional[float]] = col(Float, nullable=True)
+    cost_output_image_1024: Mapped[Optional[float]] = col(Float, nullable=True)
+    cost_input_audio_1h: Mapped[Optional[float]] = col(Float, nullable=True)
+    cost_output_audio_1h: Mapped[Optional[float]] = col(Float, nullable=True)
+    cost_input_video_1s: Mapped[Optional[float]] = col(Float, nullable=True)
+    cost_output_video_1s: Mapped[Optional[float]] = col(Float, nullable=True)
+    raw_cost_notes_input: Mapped[str] = col(String, nullable=False, default="")
+    raw_cost_notes_output: Mapped[str] = col(String, nullable=False, default="")
+    speed_tps: Mapped[Optional[int]] = col(Integer, nullable=True)
     speed_class: Mapped[SpeedClass] = col(String, nullable=False)
-    speed_tps: Mapped[Optional[float]] = col(Float, nullable=True)
     is_open_weights: Mapped[bool] = col(Boolean, nullable=False)
-    is_reasoning_model: Mapped[bool] = col(Boolean, nullable=False)
-    has_tool_calling: Mapped[bool] = col(Boolean, nullable=False)
+    license: Mapped[Optional[str]] = col(String, nullable=True)
+    reasoning_type: Mapped[ReasoningType] = col(String, nullable=False)
+    tool_calling: Mapped[ToolCalling] = col(String, nullable=False)
     is_outdated: Mapped[bool] = col(Boolean, default=False, nullable=False)
     superseded_by_model_id: Mapped[Optional[int]] = col(
         Integer, ForeignKey("llm_metadata.id"), nullable=True
@@ -125,30 +142,73 @@ class LLMMetadataSchema(BaseModel):
 
     id: Optional[int] = None  # Optional during validation
     name_normalized: str
+    name_aliases: List[str] = []
+    model_type: ModelType
     provider: str
-    parameter_count: Optional[int] = None
+    release_date: date
+    parameter_count: Optional[str] = None
     architecture: Optional[str] = None
-    quantization: Optional[str] = None
+    available_quantizations: List[str] = []
     distillation_source: Optional[str] = None
     modality_input: List[Modality] = []
     modality_output: List[Modality] = []
-    context_window: int
-    cost_input_1m: float
-    cost_output_1m: float
+    context_window: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    cost_input_text_1m: Optional[float] = None
+    cost_output_text_1m: Optional[float] = None
+    cost_input_image_1024: Optional[float] = None
+    cost_output_image_1024: Optional[float] = None
+    cost_input_audio_1h: Optional[float] = None
+    cost_output_audio_1h: Optional[float] = None
+    cost_input_video_1s: Optional[float] = None
+    cost_output_video_1s: Optional[float] = None
+    raw_cost_notes_input: str = ""
+    raw_cost_notes_output: str = ""
+    speed_tps: Optional[int] = None
     speed_class: SpeedClass
-    speed_tps: Optional[float] = None
     is_open_weights: bool
-    is_reasoning_model: bool
-    has_tool_calling: bool
+    license: Optional[str] = None
+    reasoning_type: ReasoningType
+    tool_calling: ToolCalling
     is_outdated: bool = False
     superseded_by_model_id: Optional[int] = None
+
+    @field_validator("name_normalized", mode="before")
+    @staticmethod
+    def validate_name_normalized(v):
+        return v.strip().lower().replace(" ", "-").replace("_", "-")
+
+    @field_validator("name_aliases", mode="before")
+    @staticmethod
+    def validate_name_aliases(v):
+        out = []
+        for value in _comma_separated_list_validator(v):
+            out.append(value.strip().lower().replace(" ", "-").replace("_", "-"))
+        return out
 
     @field_validator("modality_input", "modality_output", mode="before")
     @staticmethod
     def validate_modalities(v):
         return _comma_separated_list_validator(v, Modality.__args__)
 
-    @field_validator("is_open_weights", "is_reasoning_model", "has_tool_calling", mode="before")
+    @field_validator("available_quantizations", mode="before")
+    @staticmethod
+    def validate_available_quantizations(v):
+        return _comma_separated_list_validator(v)
+
+    @field_validator("release_date", mode="before")
+    @classmethod
+    def validate_release_date(cls, v):
+        if isinstance(v, date):
+            return v
+        if isinstance(v, str):
+            try:
+                return date.fromisoformat(v)
+            except ValueError:
+                raise ValueError(f"Unable to parse date: {v}")
+        raise ValueError(f"Invalid date format: {v}")
+
+    @field_validator("is_open_weights", "is_outdated", mode="before")
     @staticmethod
     def validate_bool_fields(v):
         """Convert CSV boolean strings (TRUE/FALSE, 1/0, yes/no) to Python bool."""
