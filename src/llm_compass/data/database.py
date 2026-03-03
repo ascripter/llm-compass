@@ -8,6 +8,8 @@ from sqlalchemy.orm import sessionmaker
 
 from llm_compass.config import Settings
 
+from .models import BenchmarkDictionary
+
 
 class Database:
     def __init__(self, settings: Settings):
@@ -43,3 +45,9 @@ class Database:
         from .models import Base
 
         Base.metadata.create_all(self.engine)
+
+    def get_benchmark_dictionary(self) -> dict[int, BenchmarkDictionary]:
+        """Convenience method to get the records as input for Embedding.search_index."""
+        with self.SessionLocal() as session:
+            result = session.query(BenchmarkDictionary).all()
+            return {item.id: item for item in result}

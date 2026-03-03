@@ -1,4 +1,4 @@
-"""Handle FAISS embeddings."""
+"""Handle FAISS embeddings for BenchmarkDictionary model."""
 
 from typing import Any
 
@@ -8,6 +8,7 @@ import faiss
 
 
 from llm_compass.config import Settings
+from .models import BenchmarkDictionary
 
 
 EMBED_MODEL = "qwen/qwen3-embedding-8b"
@@ -100,20 +101,22 @@ class Embedding:
     def _load_index(self) -> faiss.IndexIDMap2:
         return faiss.read_index(str(self.settings.get_faiss_path()))
 
-    def search_index(self, meta: dict[int, str], query: str, k: int = 10):
+    def search_index(self, records: dict[int, BenchmarkDictionary], query: str, top_k: int = 5):
         """Entry method for searching the FAISS index with a query string.
         Args:
-            meta: dict mapping document IDs to their original text (for retrieval after search)
+            records: dict mapping document IDs to their BenchmarkDictionary objects
+                (for retrieval after search)
             query: the input string to embed and search against the index
-            k: number of top results to return
+            top_k: number of top results to return
         """
         if self.index is None:
             raise ValueError("FAISS index not found. Please generate the index before searching.")
         q = self._openrouter_embed([query])
         faiss.normalize_L2(q)  # same normalization as index vectors
 
-        scores, ids = self.index.search(q, k)  # type: ignore
-        return scores, ids
+        scores, ids = self.index.search(q, top_k)  # type: ignore
+
+        # scores and ids are numpy array of shape (1, top_k) -> flatten to list
         scores = scores[0].tolist()
         ids = ids[0].tolist()
 
@@ -121,11 +124,16 @@ class Embedding:
         for score, doc_id in zip(scores, ids):
             if doc_id == -1:
                 continue
+            if doc_id not in records.keys():
+                raise ValueError(
+                    f"Document ID {doc_id} returned by FAISS search not found "
+                    "in BenchmarkDictionary"
+                )
             results.append(
                 {
-                    "doc_id": int(doc_id),
+                    "id": int(doc_id),
                     "score": float(score),
-                    "text": meta.get(int(doc_id), ""),
+                    "item": records[int(doc_id)],
                 }
             )
 
