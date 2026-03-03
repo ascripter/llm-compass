@@ -12,7 +12,10 @@ from urllib.parse import urlparse
 from typing import Any
 
 import httpx
-from pydantic._internal._model_construction import ModelMetaclass
+from pydantic import BaseModel
+from typing import Type
+
+from llm_compass.config import Settings
 
 from .models import (
     BenchmarkDictionarySchema,
@@ -48,15 +51,18 @@ def _fetch_url_as_csv_reader(url: str, skip_rows: int = 0) -> csv.DictReader:
 
 
 def _validate_rows(
-    reader: csv.DictReader | list[dict[str, Any]], validation_class: ModelMetaclass
+    reader: csv.DictReader | list[dict[str, Any]], validation_class: Type[BaseModel]
 ) -> list[dict[str, Any]]:
     """Validate each row using the provided Pydantic model."""
     validated_rows = []
     for row in reader:
-        for k, v in row.items():
-            if v == "":
-                row[k] = None  # set empty strings to None for optional fields
-        validated = validation_class(**row)
+        allowed_keys = set(validation_class.model_fields.keys())
+        filtered_row = {k: v for k, v in row.items() if k in allowed_keys}
+        try:
+            validated = validation_class(**filtered_row)
+        except Exception as e:
+            row_str = "\n".join(f"  {k}={v}" for k, v in row.items())
+            raise ValueError(f"Row validation failed for\n{row_str}\nwith error: {e}")
         validated_rows.append(validated.model_dump())
     return validated_rows
 
@@ -73,10 +79,6 @@ def benchmark_dictionary_from_googlesheet() -> list[dict[str, Any]]:
 
     # Sort by name_normalized and variant
     rows.sort(key=lambda x: (x["name_normalized"], x["variant"] or ""))
-
-    # Add designated FAISS  and id for DB insertion
-    for idx, record in enumerate(rows):
-        record["id"] = idx
 
     return rows
 

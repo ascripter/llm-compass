@@ -18,7 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column as col, relationship
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, field_validator
 
 
 ModelType = Literal["base", "instruct", "thinking", "generator"]  # Extendable for future types
@@ -28,17 +28,19 @@ ReasoningType = Literal["none", "standard", "native cot"]  # For categorizing re
 ToolCalling = Literal["none", "standard", "agentic"]  # For categorizing tool calling
 
 
-def _comma_separated_list_validator(v: str, allowed: Optional[tuple[str]] = None) -> list[str]:
+def _comma_separated_list_validator(v: Any, allowed: Optional[tuple[str]] = None) -> list[str]:
     """Pydantic validator to convert a comma-separated string into a list of strings."""
+    if v is None:
+        return []
     if isinstance(v, str):
         out = [item.strip() for item in v.split(",") if item.strip()]
     elif isinstance(v, list):
         out = v
     else:
-        raise ValidationError(f"Value must be a comma-separated list of strings: {v}")
+        raise ValueError(f"Value must be a comma-separated list of strings: {v}")
     for value in out:
         if allowed and value not in allowed:
-            raise ValidationError(f"Value '{value}' is not in the allowed list: {allowed}")
+            raise ValueError(f"Value '{value}' is not in the allowed list: {allowed}")
     return out
 
 
@@ -56,9 +58,10 @@ class BenchmarkDictionary(Base):
 
     __tablename__ = "benchmark_dictionary"
 
-    id: Mapped[int] = col(Integer, primary_key=True)  # FAISS index, required to be set a priori
+    # id is also FAISS index
+    id: Mapped[int] = col(Integer, autoincrement=True, primary_key=True)
     name_normalized: Mapped[str] = col(String, index=True, nullable=False)
-    variant: Mapped[str] = col(String, default=None, nullable=True)
+    variant: Mapped[str] = col(String, default="", nullable=False)
     # the (non-embedded) description string (English)
     description: Mapped[str] = col(String, nullable=False)
     categories: Mapped[List[str]] = col(JSON, default=[], nullable=False)
@@ -75,9 +78,8 @@ class BenchmarkDictionary(Base):
 class BenchmarkDictionarySchema(BaseModel):
     """Pydantic schema for validating BenchmarkDictionary entries."""
 
-    id: Optional[int] = None  # Optional during validation
     name_normalized: str
-    variant: Optional[str] = None
+    variant: str = ""
     description: str
     categories: List[str]
 
@@ -99,7 +101,7 @@ class LLMMetadata(Base):
 
     __tablename__ = "llm_metadata"
 
-    id: Mapped[Optional[int]] = col(Integer, primary_key=True)
+    id: Mapped[Optional[int]] = col(Integer, autoincrement=True, primary_key=True)
     name_normalized: Mapped[str] = col(String, index=True, nullable=False, unique=True)
     name_aliases: Mapped[List[str]] = col(JSON, default=[], nullable=False)
     model_type: Mapped[ModelType] = col(String, nullable=False)
@@ -140,7 +142,6 @@ class LLMMetadata(Base):
 class LLMMetadataSchema(BaseModel):
     """Pydantic schema for validating LLMMetadata entries."""
 
-    id: Optional[int] = None  # Optional during validation
     name_normalized: str
     name_aliases: List[str] = []
     model_type: ModelType
@@ -229,7 +230,7 @@ class BenchmarkScore(Base):
 
     __tablename__ = "benchmark_scores"
 
-    id: Mapped[Optional[int]] = col(Integer, primary_key=True)
+    id: Mapped[Optional[int]] = col(Integer, autoincrement=True, primary_key=True)
     model_id: Mapped[int] = col(Integer, ForeignKey("llm_metadata.id"), nullable=False)
     benchmark_id: Mapped[int] = col(
         Integer, ForeignKey("benchmark_dictionary.id"), nullable=False
@@ -252,7 +253,6 @@ class BenchmarkScore(Base):
 class BenchmarkScoreSchema(BaseModel):
     """Pydantic schema for validating BenchmarkScore entries."""
 
-    id: Optional[int] = None  # optional during validation
     model_id: Optional[int] = None  # Optional during validation; to be filled after FK resolution
     benchmark_id: Optional[int] = None  # Optional during validation; t.b.f. after FK resolution
     score_value: float
@@ -265,8 +265,8 @@ class BenchmarkScoreSchema(BaseModel):
     original_benchmark_name: str
     original_benchmark_variant: Optional[str] = None
 
-    @classmethod
     @field_validator("date_published", mode="before")
+    @classmethod
     def validate_date_published(cls, v):
         """Convert CSV date strings to datetime objects."""
         if v is None or v == "":
