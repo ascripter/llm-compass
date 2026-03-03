@@ -1,0 +1,48 @@
+provider,tokens_image_input,tokens_image_output,tokens_audio_input,tokens_audio_input_unit,tokens_audio_output,tokens_audio_output_unit,tokens_video_input,tokens_video_input_unit,tokens_video_output,tokens_video_output_duration
+01.AI,
+AI21 Labs,
+Alibaba,1369,,25,second,50,second,35880,second,,
+Allen Institute for AI (Ai2),6500,,,,,,600,second
+Amazon,1338,,25,second,,,8640,second
+Ant Group (inclusionAI),
+Anthropic,1398
+Baidu,,,,,750,minute
+Black Forest Labs,
+ByteDance,1312,,,,,,35280,second
+Cohere,
+Databricks,
+Deep Cogito,
+DeepSeek,576
+Google,1032,,32,second,32,second,263,second
+Hugging Face,
+IBM,
+Inception,
+Kuaishou,
+LG AI Research,
+Liquid AI,
+MBZUAI Institute of Foundation Models (LLM360),
+Meta,
+Microsoft,1921,,750,minute
+Midjourney,
+MiniMax,850
+Mistral AI,4096
+Moonshot AI,1338
+Motif Technologies,
+NAVER Cloud,
+NVIDIA,1792,,750,minute,,,512,second
+Nous Research,
+OpenAI,765,,600,minute,1200,minute
+OpenChat,
+Perplexity,
+Phind,
+Prime Intellect,
+Reka AI,
+Snowflake,
+Stability AI,
+StepFun,1024,,42,second,42,second
+TII,
+Tencent,
+Xiaomi,
+Zhipu AI,1047,1024,13,second,20,second,1050,second
+fal.ai,
+xAI,1792
