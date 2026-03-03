@@ -20,7 +20,7 @@ if __name__ == "__main__":
     )
     from llm_compass.data.read_source import (
         benchmark_dictionary_from_googlesheet,
-        llm_metadata_from_googlesheet,
+        llm_metadata_from_local_json,
         benchmark_scores_from_googlesheet,
     )
 
@@ -36,8 +36,8 @@ if __name__ == "__main__":
         records=records_benchmark, database=db, normalizer=norm, embedding=emb, update=True
     )
 
-    records_models = llm_metadata_from_googlesheet()
-    ingest_llm_metadata(records=records_models, database=db, normalizer=norm, update=True)
+    records_models = llm_metadata_from_local_json(settings)
+    ingest_llm_metadata(records=records_models, database=db, normalizer=norm, update=False)
 
     records_scores = benchmark_scores_from_googlesheet()
     ingest_benchmark_scores(

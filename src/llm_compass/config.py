@@ -20,6 +20,7 @@ _MANDATORY_ENV_VARS = ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "LLM_COMPASS
 @dataclass(frozen=True, slots=True)
 class Settings:
     project_root: Path
+    repo_root: Path
     openrouter_api_key: str
     openrouter_base_url: str
     storage_path: Path
@@ -32,6 +33,7 @@ class Settings:
         load_dotenv_file: bool = True,
         dotenv_path: str | Path | None = None,
         project_root: Path | None = None,
+        repo_root: Path | None = None,
         create_storage_dir: bool = True,
     ) -> "Settings":
         # By default, load_dotenv() does not override already-set env vars
@@ -50,6 +52,7 @@ class Settings:
 
         return cls(
             project_root=project_root or Path(__file__).absolute().parent,
+            repo_root=repo_root or Path(__file__).absolute().parent.parent.parent,
             openrouter_api_key=source["OPENROUTER_API_KEY"],
             openrouter_base_url=source["OPENROUTER_BASE_URL"],
             storage_path=storage,

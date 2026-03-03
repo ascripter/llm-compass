@@ -7,7 +7,9 @@ NOTE: All methods for manual MVP ingestion.
 
 import csv
 import io
+import json
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 from typing import Any
 
@@ -72,6 +74,7 @@ def benchmark_dictionary_from_googlesheet() -> list[dict[str, Any]]:
 
     Returns:
         List of validated dictionaries ready for database insertion.
+        (ID is mising and has to be added in the ingestion step)
     """
     url = _get_google_sheet_url(gid=0)
     reader = _fetch_url_as_csv_reader(url)
@@ -96,6 +99,20 @@ def llm_metadata_from_googlesheet() -> list[dict[str, Any]]:
     # Sort by provider and name_normalized
     rows.sort(key=lambda x: (x["provider"], x["name_normalized"]))
 
+    return rows
+
+
+def llm_metadata_from_local_json(settings: Settings) -> list[dict[str, Any]]:
+    """Get LLM metadata from local pre-cleaned JSON file.
+
+    Returns:
+        List of validated dictionaries ready for database insertion.
+    """
+    PATH = Path(settings.repo_root, "research", "llm_metadata_cleaned.json")
+    with open(PATH, "r") as f:
+        data = json.load(f)
+    # Validate and convert to list of dicts
+    rows = _validate_rows(data, LLMMetadataSchema)
     return rows
 
 
