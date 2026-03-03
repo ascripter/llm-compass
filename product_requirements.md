@@ -230,7 +230,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     {
       "model_id": "uuid-123",
       "name_normalized": "Llama 3 70B",
-      "speed_class": "slow|balanced|fast",
+      "speed_class": "slow|medium|fast",
       "speed_tps": 80,
       "rank_metrics": {
           "performance_index": 0.88,
@@ -385,7 +385,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     - `[ ] Reasoning Model`: Filters for `is_reasoning_model=true` (e.g., o1, R1). Default is `false` (i.e. any model / no filter).
     - `[ ] Tool Calling`: Filters for `has_tool_calling=true`. Default is `false` (i.e. any model / no filter).
 5.  **Minimum speed (Segmented Control):**
-    - Options: `Any/Slow+` | `Balanced+` | `Fast only`
+    - Options: `Any/Slow+` | `Medium+` | `Fast only`
     - *Hint text:* "Filters models by expected throughput class. TPS can vary by provider/hardware."
 
 #### B. Chat Input

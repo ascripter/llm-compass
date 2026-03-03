@@ -112,9 +112,9 @@ class Modality(str, Enum):
     VIDEO = "video"
 
 class SpeedClass(str, Enum):
-    FAST     = "fast"
-    BALANCED = "balanced"  # maps to "medium" in DB
-    SLOW     = "slow"
+    FAST   = "fast"
+    MEDIUM = "medium"
+    SLOW   = "slow"
 
 class DeploymentType(str, Enum):
     ANY   = "any"

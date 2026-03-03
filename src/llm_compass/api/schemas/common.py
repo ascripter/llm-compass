@@ -13,7 +13,7 @@ class Modality(str, Enum):
 
 class SpeedClass(str, Enum):
     FAST = "fast"
-    BALANCED = "balanced"
+    MEDIUM = "medium"
     SLOW = "slow"
 
 
