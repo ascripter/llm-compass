@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from src.llm_compass.api.main import app
-from src.llm_compass.api.routers import query as query_router
+from llm_compass.api.main import app
+from llm_compass.api.routers import query as query_router
 
 
 class FakeGraph:

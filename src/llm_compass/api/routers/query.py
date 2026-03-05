@@ -7,7 +7,7 @@ from ..deps import get_db, require_api_key
 from ..schemas.common import ErrorDetail
 from ..schemas.query import ClarifyRequest, QueryRequest, QueryResponse, TraceEvent
 try:
-    from src.llm_compass.agentic_core.graph import build_graph
+    from llm_compass.agentic_core.graph import build_graph
 except Exception:  # pragma: no cover - startup fallback when agent deps are unavailable
     def build_graph() -> Any:
         raise RuntimeError("LangGraph build_graph is unavailable")

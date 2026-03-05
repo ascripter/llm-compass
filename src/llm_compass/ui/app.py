@@ -4,8 +4,8 @@ Req 3.1: "Mission Control" layout.
 """
 
 import streamlit as st
-from src.ui.components import sidebar, chat, tables, traceability
-from src.agentic_core.graph import build_graph
+from ui.components import sidebar, chat, tables, traceability
+from agentic_core.graph import build_graph
 
 st.set_page_config(layout="wide", page_title="LLM Benchmark Analyst")
 
