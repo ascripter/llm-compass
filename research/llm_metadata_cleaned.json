@@ -125,7 +125,7 @@
   },
   {
     "name_normalized": "llama-3.1-70b-instruct",
-    "name_aliases": "meta-llama-3.1-70B-instruct,llama3-70b-instruct",
+    "name_aliases": "meta-llama-3.1-70b-instruct,llama3-70b-instruct",
     "model_type": "instruct",
     "provider": "Meta",
     "release_date": "2024-07-23",
@@ -1706,7 +1706,7 @@
   },
   {
     "name_normalized": "mistral-small-3",
-    "name_aliases": "mistral-small-2501,mistral-small-3-instruct,mistral-small-24B-instruct-2501",
+    "name_aliases": "mistral-small-2501,mistral-small-3-instruct,mistral-small-24b-instruct-2501",
     "model_type": "instruct",
     "provider": "Mistral AI",
     "release_date": "2025-01-29",
@@ -2605,7 +2605,7 @@
   },
   {
     "name_normalized": "yi-vl-34b",
-    "name_aliases": "yi-34B",
+    "name_aliases": "yi-34b",
     "model_type": "instruct",
     "provider": "01.AI",
     "release_date": "2024-01-22",
@@ -6727,7 +6727,7 @@
     "tool_calling": "agentic"
   },
   {
-    "name_normalized": "nemotron-nano-12B-v2-vl",
+    "name_normalized": "nemotron-nano-12b-v2-vl",
     "name_aliases": "nvidia-nemotron-nano-v2-12b-vl, nvidia-nemotron-nano-vl-12b-v2, nvidia-nemotron-nano-12b-v2-vl-bf16",
     "model_type": "instruct",
     "provider": "NVIDIA",
@@ -6789,7 +6789,7 @@
     "tool_calling": "none"
   },
   {
-    "name_normalized": "nemotron-speech-streaming-en-0.6B",
+    "name_normalized": "nemotron-speech-streaming-en-0.6b",
     "name_aliases": "nvidia-nemotron-speech-streaming-en-0.6b, nemotron-speech-asr",
     "model_type": "generator",
     "provider": "NVIDIA",
@@ -6882,8 +6882,8 @@
     "tool_calling": "standard"
   },
   {
-    "name_normalized": "Kimi-K2-0905",
-    "name_aliases": "kimi-k2-0905, kimi-k2-instruct-0905",
+    "name_normalized": "kimi-k2-0905",
+    "name_aliases": "kimi-k2-instruct-0905",
     "model_type": "instruct",
     "provider": "Moonshot AI",
     "release_date": "2025-09-04",

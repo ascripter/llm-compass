@@ -97,13 +97,13 @@ class LLMMetadataManager:
         names = sorted([llm["name_normalized"] for llm in self.llms])
         out = []
         for name in names:
-            out.append(name)
+            out.append(name.strip().lower())
             llm = next(
                 (llm for llm in self.llms if llm["name_normalized"] == name),
                 None,
             )
             if llm and llm["name_aliases"]:
-                names_alt = [_.strip() for _ in llm["name_aliases"].split(",")]
+                names_alt = [_.strip().lower() for _ in llm["name_aliases"].split(",")]
                 out.extend(names_alt)
         return sorted(out)
 
@@ -158,6 +158,8 @@ class LLMMetadataManager:
                         print(
                             f"❌ {llm['name_normalized']}: Expected float for {key} but got '{value}'"
                         )
+                elif key in ("name_normalized", "name_aliases") and isinstance(value, str):
+                    llm[key] = value.strip().lower()
 
     def check_cost_fields(self):
         """Checks that cost fields are present for each modality.
@@ -179,7 +181,10 @@ class LLMMetadataManager:
                     if llm[cost_key] in ("", None):
                         # try to fill
                         ct = cost_translate(llm["provider"], modality, mode)
-                        if ct is not None and llm[cost_key_text] not in ("", None):
+                        if ct is not None and llm[cost_key_text] not in (
+                            "",
+                            None,
+                        ):
                             llm[cost_key] = ct * llm[cost_key_text] / 1e6
                         elif ct is None:
                             print(
