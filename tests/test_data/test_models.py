@@ -5,7 +5,7 @@ Req 1.2: Verify schema integrity and vector fields.
 
 import pytest
 from sqlalchemy.exc import IntegrityError
-from src.data.models import LLMMetadata, BenchmarkDictionary
+from llm_compass.data.models import LLMMetadata, BenchmarkDictionary
 
 
 def test_llm_metadata_uniqueness(session):

@@ -17,7 +17,8 @@ if __name__ == "__main__":
     if project_root not in sys.path:
         sys.path.append(project_root)
 
-from llm_compass.data.models import LLMMetadataSchema, Modality
+from llm_compass.data.models import LLMMetadataSchema
+from llm_compass.common.types import Modality, MODALITY_VALUES
 
 SOURCE_LLM_METADATA = Path(Path(__file__).parent / "llm_metadata_scraped.json")
 TARGET_LLM_METADATA = Path(Path(__file__).parent / "llm_metadata_cleaned.json")
@@ -39,7 +40,7 @@ def cost_translate(provider: str, modality: str, mode: str) -> float | None:
     """
     if provider not in PROVIDERS.provider.values:
         raise ValueError(f"❌ Provider not found: {provider}")
-    if modality not in Modality.__args__:
+    if modality not in MODALITY_VALUES:
         raise ValueError(f"❌Invalid modality: {modality}")
     if mode not in ("input", "output"):
         raise ValueError(f"❌Invalid mode: {mode}")
