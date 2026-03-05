@@ -3,8 +3,8 @@ Tests the LangGraph orchestration logic.
 Req 2.3: Verify state transitions.
 """
 
-from src.agentic_core.graph import build_graph
-from src.agentic_core.state import AgentState
+from llm_compass.agentic_core.graph import build_graph
+from llm_compass.agentic_core.state import AgentState
 
 
 def test_intent_validation_flow():

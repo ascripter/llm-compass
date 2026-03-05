@@ -27,6 +27,7 @@ pytest>=9.0.0,<10.0.0
 
 # --- Orchestration ---
 langgraph>=1.0.0,<2.0.0
+langchain-openai>=1.1.0,<2.0.0
 
 # --- Embeddings (optional: only if you embed locally) ---
 # sentence-transformers>=5.2.0,<6.0.0 # Requires Python >=3.10; classifier includes 3.13
