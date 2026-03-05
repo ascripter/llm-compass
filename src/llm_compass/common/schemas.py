@@ -7,8 +7,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from ..data.models import ReasoningType
-from ..api.schemas.common import DeploymentType, Modality, SpeedClass
+from .types import Modality, ReasoningType, SpeedClass, DeploymentType
+
 
 
 class Constraints(BaseModel):
@@ -20,7 +20,7 @@ class Constraints(BaseModel):
     min_context_window: int = Field(0, ge=0)
     modality_input: List[Modality] = Field(default_factory=lambda: ["text"])
     modality_output: List[Modality] = Field(default_factory=lambda: ["text"])
-    deployment: DeploymentType = DeploymentType.ANY
+    deployment: DeploymentType = "any"
     reasoning_type: Optional[ReasoningType] = None
     require_tool_calling: bool = False
     min_speed_class: Optional[SpeedClass] = None
