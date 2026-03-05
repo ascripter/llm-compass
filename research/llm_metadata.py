@@ -17,7 +17,8 @@ if __name__ == "__main__":
     if project_root not in sys.path:
         sys.path.append(project_root)
 
-from llm_compass.data.models import LLMMetadataSchema, Modality
+from llm_compass.data.models import LLMMetadataSchema
+from llm_compass.common.types import Modality, MODALITY_VALUES
 
 SOURCE_LLM_METADATA = Path(Path(__file__).parent / "llm_metadata_scraped.json")
 TARGET_LLM_METADATA = Path(Path(__file__).parent / "llm_metadata_cleaned.json")
@@ -39,7 +40,7 @@ def cost_translate(provider: str, modality: str, mode: str) -> float | None:
     """
     if provider not in PROVIDERS.provider.values:
         raise ValueError(f"❌ Provider not found: {provider}")
-    if modality not in Modality.__args__:
+    if modality not in MODALITY_VALUES:
         raise ValueError(f"❌Invalid modality: {modality}")
     if mode not in ("input", "output"):
         raise ValueError(f"❌Invalid mode: {mode}")
@@ -96,13 +97,13 @@ class LLMMetadataManager:
         names = sorted([llm["name_normalized"] for llm in self.llms])
         out = []
         for name in names:
-            out.append(name)
+            out.append(name.strip().lower())
             llm = next(
                 (llm for llm in self.llms if llm["name_normalized"] == name),
                 None,
             )
             if llm and llm["name_aliases"]:
-                names_alt = [_.strip() for _ in llm["name_aliases"].split(",")]
+                names_alt = [_.strip().lower() for _ in llm["name_aliases"].split(",")]
                 out.extend(names_alt)
         return sorted(out)
 
@@ -157,6 +158,8 @@ class LLMMetadataManager:
                         print(
                             f"❌ {llm['name_normalized']}: Expected float for {key} but got '{value}'"
                         )
+                elif key in ("name_normalized", "name_aliases") and isinstance(value, str):
+                    llm[key] = value.strip().lower()
 
     def check_cost_fields(self):
         """Checks that cost fields are present for each modality.
@@ -178,7 +181,10 @@ class LLMMetadataManager:
                     if llm[cost_key] in ("", None):
                         # try to fill
                         ct = cost_translate(llm["provider"], modality, mode)
-                        if ct is not None and llm[cost_key_text] not in ("", None):
+                        if ct is not None and llm[cost_key_text] not in (
+                            "",
+                            None,
+                        ):
                             llm[cost_key] = ct * llm[cost_key_text] / 1e6
                         elif ct is None:
                             print(

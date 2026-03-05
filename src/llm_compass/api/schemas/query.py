@@ -2,19 +2,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from ...common.schemas import Constraints
 from .common import DeploymentType, ErrorDetail, Modality, SpeedClass
-
-
-class Constraints(BaseModel):
-    """Maps 1:1 to UI constraint panel (Req 3.2)."""
-
-    min_context_window: int = Field(0, ge=0)
-    modality_input: List[Modality] = ["text"]
-    modality_output: List[Modality] = ["text"]
-    deployment: DeploymentType = DeploymentType.ANY
-    require_reasoning: bool = False
-    require_tool_calling: bool = False
-    min_speed_class: Optional[SpeedClass] = None
 
 
 class QueryRequest(BaseModel):
@@ -121,4 +110,3 @@ class QueryResponse(BaseModel):
     ranked_data: Optional[RankedLists] = None
     ui_components: Optional[UIComponents] = None
     errors: List[ErrorDetail] = []
-

@@ -204,11 +204,11 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
 - **Output:** List of objects: `[{id: "...", name: "HumanEval", relevance_weight: 0.95}, ...]`.
 
 
-#### B. `retrieve_and_rank_models(benchmark_weights, constraints, predicted_io_ratio)`
+#### B. `retrieve_and_rank_models(benchmark_weights, constraints, token_ratio_estimation)`
 - **Input:**
   - `benchmark_weights`: List[Dict] (from Tool A)
   - `constraints`: Dict (from UI)
-  - `predicted_io_ratio`: Dict `{"input": float, "output": float}` (e.g., `{"input": 0.9, "output": 0.1}`)
+  - `token_ratio_estimation`: Dict `{"normalized_input_ratios": dict[Modality, float], "normalized_output_ratios": dict[Modality, float]}` (e.g., `{"normalized_input_ratios": {"text": 0.1, "image": 0.75}, "normalized_output_ratios": {"text": 0.15}}`). All values sum to `1.0`
 - **Action:**
   1. **Model Filtering:** Query `LLM Metadata` to find ALL models that match the hard constraints from UI input (`is_outdated=false` by default).
   2. **Score Retrieval:** For the filtered models, fetch scores for the *relevant benchmarks*.
@@ -216,7 +216,13 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
      - *Algorithm:* If Model X lacks data for Variant A but has data for Variant B, use "Bridge Models" (models with both A and B scores) to calculate an offset `Delta = Avg(Score_B) - Avg(Score_A)`. Estimate `Score_A(X) = Score_B(X) - Delta`.
      - *Constraint:* Mark estimated scores as `is_estimated: true`.
   4. **Dynamic Cost Weighting:**
-     - *Definition:* `Blended_Cost_1M_USD = (cost_input_1m * predicted_io_ratio.input) + (cost_output_1m * predicted_io_ratio.output)`
+     - *Definition:* `Blended_Cost_1M_USD = sum(token_ratio_estimation[mode][modality] * cost-from-llm_metadata) `, i.e. 
+     ```
+     Blended_Cost_1M_USD = 
+      token_ratio_estimation["normalized_input_ratios"]["text"] * cost_input_text_1m + 
+      token_ratio_estimation["normalized_input_ratios"]["image"] * cost_input_image_1024 +
+      token_ratio_estimation["normalized_output_ratios"]["text"] * cost_output_text_1m
+     ```
      - *Definition:* `Blended_Cost_Index` is a normalized "cheaper is better" score [0,1].
      - *Formula (Per-Query Normalization):* `Blended_Cost_Index = (C_max - Blended_Cost_1M_USD) / max(eps, (C_max - C_min))`, where `C_min` and `C_max` are the min/max blended costs *within the current filtered candidate set* and `eps = 1e-9`.
   5. **Ranking Strategy (Multi-View):**
@@ -230,7 +236,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     {
       "model_id": "uuid-123",
       "name_normalized": "Llama 3 70B",
-      "speed_class": "slow|balanced|fast",
+      "speed_class": "slow|medium|fast",
       "speed_tps": 80,
       "rank_metrics": {
           "performance_index": 0.88,
@@ -332,7 +338,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
      - *Example (Simple Chat):* `{"input": 0.5, "output": 0.5}`
      - *Example (Novel Writing):* `{"input": 0.1, "output": 0.9}`
   2. **Search Query Gen:** Generate 3-5 benchmark search queries from user's input.
-- **Output:** `{ "search_queries": [...], "predicted_io_ratio": {...} }`
+- **Output:** `{ "search_queries": [...], "token_ratio_estimation": {...} }`
 
 #### Node 3: Benchmark Discovery (Tool)
 - **Input:** `search_queries` from Node 2.
@@ -340,7 +346,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
 - **Output:** `weighted_benchmarks: List[Dict]` (e.g., `[{"id": "mmlu", "weight": 0.9}, {"id": "gpqa", "weight": 0.8}]`).
 
 #### Node 4: Scoring & Ranking (Tool)
-- **Input:** `weighted_benchmarks` (from Node 3) + `constraints` and `predicted_io_ratio` (from Global State / Node 2).
+- **Input:** `weighted_benchmarks` (from Node 3) + `constraints` and `token_ratio_estimation` (from Global State / Node 2).
 - **Task:** Execute `retrieve_and_rank_models`.
 - **Logic:**
   - Fetch models.
@@ -385,7 +391,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     - `[ ] Reasoning Model`: Filters for `is_reasoning_model=true` (e.g., o1, R1). Default is `false` (i.e. any model / no filter).
     - `[ ] Tool Calling`: Filters for `has_tool_calling=true`. Default is `false` (i.e. any model / no filter).
 5.  **Minimum speed (Segmented Control):**
-    - Options: `Any/Slow+` | `Balanced+` | `Fast only`
+    - Options: `Any/Slow+` | `Medium+` | `Fast only`
     - *Hint text:* "Filters models by expected throughput class. TPS can vary by provider/hardware."
 
 #### B. Chat Input

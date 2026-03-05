@@ -3,7 +3,7 @@ Defines the database schema using SQLAlchemy and pgvector.
 Maps directly to Product Requirements Section 1.2 (A, B, C, D).
 """
 
-from typing import List, Optional, Literal, Any
+from typing import List, Optional, Any
 from datetime import date, datetime
 from sqlalchemy import (
     Boolean,
@@ -20,15 +20,14 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column as col, relati
 
 from pydantic import BaseModel, field_validator
 
-
-ModelType = Literal["base", "instruct", "thinking", "generator"]  # Extendable for future types
-Modality = Literal["text", "image", "audio", "video"]  # Extendable for future modalities
-SpeedClass = Literal["fast", "medium", "slow"]  # For categorizing model inference speed
-ReasoningType = Literal["none", "standard", "native cot"]  # For categorizing reasoning
-ToolCalling = Literal["none", "standard", "agentic"]  # For categorizing tool calling
+from ..common.types import (
+    ModelType, Modality, ReasoningType, SpeedClass, ToolCalling, MODALITY_VALUES
+)
 
 
-def _comma_separated_list_validator(v: Any, allowed: Optional[tuple[str]] = None) -> list[str]:
+def _comma_separated_list_validator(
+    v: Any, allowed: Optional[tuple[str, ...]] = None
+) -> list[str]:
     """Pydantic validator to convert a comma-separated string into a list of strings."""
     if v is None:
         return []
@@ -190,7 +189,7 @@ class LLMMetadataSchema(BaseModel):
     @field_validator("modality_input", "modality_output", mode="before")
     @staticmethod
     def validate_modalities(v):
-        return _comma_separated_list_validator(v, Modality.__args__)
+        return _comma_separated_list_validator(v, MODALITY_VALUES)
 
     @field_validator("available_quantizations", mode="before")
     @staticmethod

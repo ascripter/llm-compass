@@ -2,7 +2,7 @@ from enum import Enum
 from typing import List
 
 from pydantic import BaseModel, Field
-
+from llm_compass.common.types import DeploymentType
 
 class Modality(str, Enum):
     TEXT = "text"
@@ -13,14 +13,8 @@ class Modality(str, Enum):
 
 class SpeedClass(str, Enum):
     FAST = "fast"
-    BALANCED = "balanced"
+    MEDIUM = "medium"
     SLOW = "slow"
-
-
-class DeploymentType(str, Enum):
-    ANY = "any"
-    CLOUD = "cloud"
-    LOCAL = "local"
 
 
 class Pagination(BaseModel):
