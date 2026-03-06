@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import time
 
-from ui.components.sidebar import render_sidebar
-from ui.components.chat import render_chat
-from ui.components.traceability import render_traceability
-from ui.components.tables import render_results
+from llm_compass.ui.components.sidebar import render_sidebar
+from llm_compass.ui.components.chat import render_chat
+from llm_compass.ui.components.traceability import render_traceability
+from llm_compass.ui.components.tables import render_results
 
 
 st.set_page_config(
