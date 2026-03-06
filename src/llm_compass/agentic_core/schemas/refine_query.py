@@ -1,5 +1,6 @@
 """
 Structured output schemas for Req 2.3 Node 2 (Query Refiner).
+- Node 2 (a): Refine Query to get 3-5 search queries.
 """
 
 from pydantic import BaseModel, Field, field_validator

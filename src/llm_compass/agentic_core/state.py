@@ -10,7 +10,7 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph import MessagesState  # implies `messages` attribute
 from langgraph.graph.message import add_messages
 
-from .schemas.validate_intent import IntentExtraction, TokenRatioEstimation
+from .schemas import IntentExtraction, TokenRatioEstimation
 from ..common.schemas import Constraints
 from ..common.types import Modality
 
