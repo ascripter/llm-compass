@@ -1,18 +1,19 @@
 """
-Req 2.3 Node 1: Intent Validator
+Req 2.3 Node 1: Intent Validator (LLM)
 
 This node acts as a gatekeeper for the agentic workflow. It performs three critical checks:
 1. Task Description Check: Ensures the user's query is concrete and actionable.
 2. Ambiguity Check (I/O Ratio): Determines if the query implies a clear input/output token ratio.
-3. Consistency Check: Validates that the user's textual intent does not conflict with active UI filters (Hard/Weak Mismatches).
+3. Consistency Check: Validates that the user's textual intent does not conflict with UI filters.
 
 If any check fails, it sets `clarification_needed` to True and provides a `clarification_question`.
 It enforces a limit of 3 consecutive clarification cycles (max 3 before terminal error).
 
 Req 2.3 Node 1 Workflow:
 - Input: user_query + constraints from UI
-- Output: clarification_needed flag + clarification_question (if needed) + logs
-- Routing: If clarification_needed, pause and wait for user response; else proceed to Node 2 (Query Refiner)
+- Output: IntentExtraction object + clarification_count + clarification_limit_exceeded + logs
+- Routing: If IntentExtraction.is_specific is False, pause and wait for user response;
+           else proceed to Node 2 (a) (Query Refiner) and Node 2 (b) (Token Ratio Estimation)
 """
 
 from typing import Any
@@ -24,7 +25,7 @@ from langchain_openai import ChatOpenAI
 from llm_compass.common.schemas import Constraints
 from llm_compass.common.types import MODALITY_VALUES
 from ..state import AgentState
-from ..schemas.validate_intent import IntentExtraction, TokenRatioEstimation
+from ..schemas import IntentExtraction
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +34,6 @@ INTENT_VALIDATOR_SYSTEM_PROMPT = """You are an intent validation assistant in an
 
 Your task is to analyze the user's request (and any conversation history) to determine their intended task. 
 Extract the intended modalities and determine if the request is specific enough to proceed, strictly following the rules and examples defined in your output schema."""
-
-TOKEN_ESTIMATOR_SYSTEM_PROMPT = """You are a token volume estimation assistant in an AI routing pipeline.
-
-Your task is to analyze the user's validated request and estimate the real-world scale of their task.
-Extract the approximate volume of data the user intends to provide as input, and the volume they expect the model to generate as output.
-
-Strictly follow the unit definitions (words, images, minutes) and examples provided in your output schema."""
 
 
 def validate_intent_node(state: AgentState) -> dict[str, Any]:
