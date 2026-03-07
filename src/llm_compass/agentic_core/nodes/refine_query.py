@@ -68,7 +68,8 @@ def query_refiner_node(state: AgentState, settings: Settings) -> dict[str, Any]:
             - search_queries: list[str]
             - logs: list[str]
     """
-    llm = settings.make_llm("openai/gpt-oss-120b", temperature=0)
+    # patch: use 4o-mini since gpt-oss-120b doesn't adhere to schema consistently
+    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0)
     query_expander = llm.with_structured_output(QueryExpansion)
 
     constraints_raw = state.get("constraints")

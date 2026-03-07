@@ -64,7 +64,8 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         "- if possible, estimate the amount of tokens for input / output *per modality* "
         "that will occur with an average LLM invocation"
     )
-    llm = settings.make_llm("openai/gpt-oss-120b", temperature=0)
+    # patch: use 4o-mini since gpt-oss-120b doesn't adhere to schema consistently
+    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0) 
     structured_llm = llm.with_structured_output(IntentExtraction)
     messages = [SystemMessage(INTENT_VALIDATOR_SYSTEM_PROMPT)] + state["messages"]  # type:ignore
     response: IntentExtraction = structured_llm.invoke(messages)  # type: ignore
