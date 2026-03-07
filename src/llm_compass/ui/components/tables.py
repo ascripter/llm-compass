@@ -1,33 +1,35 @@
+import pandas as pd
 import streamlit as st
 
-def render_results(df):
-    st.subheader("📊 Results")
 
-    if df is None:
+def render_results(display: dict | None) -> None:
+    st.subheader("Results")
+
+    if display is None:
         st.info("Run a query to see benchmark results.")
         return
 
-    df = df.copy()
-    df["Est?"] = df["HumanEval"].isna()
+    # Warnings
+    for w in display.get("warnings", []):
+        st.warning(w.get("message", ""))
 
-    st.dataframe(df, use_container_width=True)
+    # Comparison table from API
+    table = display.get("comparison_table")
+    if table:
+        st.markdown(f"**{table.get('title', 'Results')}**")
+        df = pd.DataFrame(table.get("rows", []), columns=table.get("columns", []))
+        st.dataframe(df, use_container_width=True)
 
-    st.subheader("🏆 Recommendations")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="metric-card winner">
-        <h4>Performance Winner</h4>
-        <p>Model-A</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="metric-card">
-        <h4>Budget Winner</h4>
-        <p>Model-C</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # Recommendation cards
+    cards = display.get("recommendation_cards", [])
+    if cards:
+        st.subheader("Recommendations")
+        cols = st.columns(max(len(cards), 1))
+        for col, card in zip(cols, cards):
+            with col:
+                st.markdown(
+                    f'<div class="metric-card"><h4>{card.get("category", "")}</h4>'
+                    f'<p><strong>{card.get("model_name", "")}</strong></p>'
+                    f'<p>{card.get("reason", "")}</p></div>',
+                    unsafe_allow_html=True,
+                )

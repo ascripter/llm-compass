@@ -1,7 +1,11 @@
 # llm-compass
 
 ## Setup (dev notes)
-rename `.env.example` to `.env` and fill variables accordingly
+- rename `.env.example` to `.env` and fill variables accordingly
+- `pip install -e .` in the repo root
+- Then run the following commands in 2 terminals
+  - `streamlit run src\llm_compass\ui\app.py`
+  - `fastapi dev src\llm_compass\api\main.py`
 
 ## Data (dev notes)
 Build database initially via
