@@ -1,8 +1,8 @@
 """
 Unit tests for the Intent Validator node (Req 2.3 Node 1).
 
-The node calls an LLM (ChatOpenAI) internally, so tests mock it to return
-controlled IntentExtraction objects and verify state_update contents.
+The node calls an LLM via settings.make_llm() internally, so tests pass a mock
+Settings object to return controlled IntentExtraction objects and verify state_update contents.
 
 Tests cover:
 1. LLM returns is_specific=False  → clarification message + count increment
@@ -13,7 +13,7 @@ Tests cover:
 """
 
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -22,6 +22,7 @@ from llm_compass.agentic_core.schemas.validate_intent import IntentExtraction
 from llm_compass.agentic_core.state import AgentState
 from llm_compass.common.schemas import Constraints
 from llm_compass.common.types import Modality
+from llm_compass.config import Settings
 
 
 # ---------------------------------------------------------------------------
@@ -56,16 +57,15 @@ def _make_response(
     )
 
 
-def _patch_llm(response: IntentExtraction):
-    """Returns a context manager that patches ChatOpenAI to return *response*."""
+def _make_settings(response: IntentExtraction) -> MagicMock:
+    """Returns a mock Settings whose make_llm returns an LLM that yields *response*."""
     mock_structured = MagicMock()
     mock_structured.invoke.return_value = response
     mock_llm = MagicMock()
     mock_llm.with_structured_output.return_value = mock_structured
-    return patch(
-        "llm_compass.agentic_core.nodes.validate_intent.ChatOpenAI",
-        return_value=mock_llm,
-    )
+    mock_settings = MagicMock(spec=Settings)
+    mock_settings.make_llm.return_value = mock_llm
+    return mock_settings
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +76,7 @@ class TestNotSpecific:
 
     def test_appends_ai_message(self):
         response = _make_response(is_specific=False, clarification_needed=["What is your use case?"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state())
+        result = validate_intent_node(_make_state(), settings=_make_settings(response))
 
         assert "messages" in result
         assert len(result["messages"]) == 1
@@ -86,15 +85,13 @@ class TestNotSpecific:
 
     def test_increments_clarification_count(self):
         response = _make_response(is_specific=False, clarification_needed=["Clarify please."])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(clarification_count=1))
+        result = validate_intent_node(_make_state(clarification_count=1), settings=_make_settings(response))
 
         assert result["clarification_count"] == 2
 
     def test_intent_extraction_always_returned(self):
         response = _make_response(is_specific=False, clarification_needed=["Clarify please."])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state())
+        result = validate_intent_node(_make_state(), settings=_make_settings(response))
 
         assert result["intent_extraction"] is response
 
@@ -102,8 +99,7 @@ class TestNotSpecific:
         """A single question should be returned as-is, not wrapped in a list."""
         question = "What data modality do you need?"
         response = _make_response(is_specific=False, clarification_needed=[question])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state())
+        result = validate_intent_node(_make_state(), settings=_make_settings(response))
 
         msg_content = result["messages"][0].content  # type: ignore[union-attr]
         assert msg_content == question
@@ -111,8 +107,7 @@ class TestNotSpecific:
     def test_multiple_questions_formatted_as_list(self):
         questions = ["What is your input?", "What is your output?"]
         response = _make_response(is_specific=False, clarification_needed=questions)
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state())
+        result = validate_intent_node(_make_state(), settings=_make_settings(response))
 
         msg_content = result["messages"][0].content  # type: ignore[union-attr]
         assert "Please clarify the following points:" in msg_content
@@ -122,16 +117,14 @@ class TestNotSpecific:
     def test_zero_clarification_questions_fallback_message(self):
         """Edge case: LLM returns is_specific=False but empty clarification list."""
         response = _make_response(is_specific=False, clarification_needed=[])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state())
+        result = validate_intent_node(_make_state(), settings=_make_settings(response))
 
         msg_content = result["messages"][0].content  # type: ignore[union-attr]
         assert msg_content == "Please clarify your task."
 
     def test_log_entry_added(self):
         response = _make_response(is_specific=False, clarification_needed=["Clarify."])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state())
+        result = validate_intent_node(_make_state(), settings=_make_settings(response))
 
         assert "logs" in result
         assert any("Intent Validator" in log for log in result["logs"])
@@ -145,15 +138,13 @@ class TestClarificationLimit:
 
     def test_limit_exceeded_sets_flag(self):
         response = _make_response(is_specific=False, clarification_needed=["Clarify."])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(clarification_count=3))
+        result = validate_intent_node(_make_state(clarification_count=3), settings=_make_settings(response))
 
         assert result.get("clarification_limit_exceeded") is True
 
     def test_limit_exceeded_appends_message(self):
         response = _make_response(is_specific=False, clarification_needed=["Clarify."])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(clarification_count=3))
+        result = validate_intent_node(_make_state(clarification_count=3), settings=_make_settings(response))
 
         assert "messages" in result
         assert isinstance(result["messages"][0], AIMessage)  # type: ignore[arg-type]
@@ -161,16 +152,14 @@ class TestClarificationLimit:
     def test_limit_not_triggered_when_specific(self):
         """count >= 3 but LLM says is_specific=True → no limit flag."""
         response = _make_response(is_specific=True)
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(clarification_count=3))
+        result = validate_intent_node(_make_state(clarification_count=3), settings=_make_settings(response))
 
         assert result.get("clarification_limit_exceeded") is not True
 
     def test_limit_not_triggered_at_count_2(self):
         """count=2 → still under limit, normal clarification flow."""
         response = _make_response(is_specific=False, clarification_needed=["Clarify."])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(clarification_count=2))
+        result = validate_intent_node(_make_state(clarification_count=2), settings=_make_settings(response))
 
         assert result.get("clarification_limit_exceeded") is not True
         assert result["clarification_count"] == 3
@@ -189,24 +178,21 @@ class TestSpecificNoConflict:
             output_modalities=["text"],
         )
         constraints = Constraints(min_context_window=0, modality_input=["text"], modality_output=["text"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(constraints=constraints))
+        result = validate_intent_node(_make_state(constraints=constraints), settings=_make_settings(response))
 
         assert "messages" not in result
 
     def test_intent_extraction_returned(self):
         response = _make_response(is_specific=True, input_modalities=["text"], output_modalities=["text"])
         constraints = Constraints(min_context_window=0, modality_input=["text"], modality_output=["text"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(constraints=constraints))
+        result = validate_intent_node(_make_state(constraints=constraints), settings=_make_settings(response))
 
         assert result["intent_extraction"] is response
 
     def test_no_logs_on_clean_pass(self):
         response = _make_response(is_specific=True, input_modalities=["text"], output_modalities=["text"])
         constraints = Constraints(min_context_window=0, modality_input=["text"], modality_output=["text"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(constraints=constraints))
+        result = validate_intent_node(_make_state(constraints=constraints), settings=_make_settings(response))
 
         assert "logs" not in result
 
@@ -225,8 +211,7 @@ class TestModalityConflict:
             output_modalities=["text"],
         )
         constraints = Constraints(min_context_window=0, modality_input=["text"], modality_output=["text"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(constraints=constraints))
+        result = validate_intent_node(_make_state(constraints=constraints), settings=_make_settings(response))
 
         assert "messages" in result
         assert isinstance(result["messages"][0], AIMessage)  # type: ignore[arg-type]
@@ -239,8 +224,7 @@ class TestModalityConflict:
             output_modalities=["text"],
         )
         constraints = Constraints(min_context_window=0, modality_input=["text", "image"], modality_output=["text"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(constraints=constraints))
+        result = validate_intent_node(_make_state(constraints=constraints), settings=_make_settings(response))
 
         assert "messages" in result
 
@@ -251,8 +235,7 @@ class TestModalityConflict:
             output_modalities=["text"],
         )
         constraints = Constraints(min_context_window=0, modality_input=["text"], modality_output=["text"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(constraints=constraints))
+        result = validate_intent_node(_make_state(constraints=constraints), settings=_make_settings(response))
 
         msg = result["messages"][0].content  # type: ignore[union-attr]
         assert "modali" in msg.lower()
@@ -264,8 +247,7 @@ class TestModalityConflict:
             output_modalities=["text"],
         )
         constraints = Constraints(min_context_window=0, modality_input=["text"], modality_output=["text"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(constraints=constraints))
+        result = validate_intent_node(_make_state(constraints=constraints), settings=_make_settings(response))
 
         # The node patches response.is_specific = False
         assert result["intent_extraction"].is_specific is False  # type: ignore[union-attr]
@@ -277,8 +259,7 @@ class TestModalityConflict:
             output_modalities=["text"],
         )
         constraints = Constraints(min_context_window=0, modality_input=["text"], modality_output=["text"])
-        with _patch_llm(response):
-            result = validate_intent_node(_make_state(constraints=constraints))
+        result = validate_intent_node(_make_state(constraints=constraints), settings=_make_settings(response))
 
         assert "logs" in result
         assert any("Modality-mismatch" in log for log in result["logs"])

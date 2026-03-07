@@ -14,8 +14,8 @@ from typing import Any
 import logging
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, AnyMessage
-from langchain_openai import ChatOpenAI
 
+from llm_compass.config import Settings
 from llm_compass.common.schemas import Constraints
 from llm_compass.common.types import MODALITY_VALUES
 from ..state import AgentState
@@ -39,8 +39,8 @@ def _system_prompt(chat_history: list[AnyMessage]):
 3. Follow the output schema strictly.
 """
 
-def token_ratio_estimation_node(state: AgentState) -> dict[str, Any]:
-    llm = ChatOpenAI(model="moonshotai/kimi-k2.5", temperature=0)
+def token_ratio_estimation_node(state: AgentState, settings: Settings) -> dict[str, Any]:
+    llm = settings.make_llm("moonshotai/kimi-k2.5", temperature=0)
     token_estimator = llm.with_structured_output(TokenRatioEstimation)
 
     history = state.get("messages", [])

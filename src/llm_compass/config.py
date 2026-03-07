@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Mapping
 
 from dotenv import load_dotenv
+from pydantic import SecretStr
 
 
 _MANDATORY_ENV_VARS = ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "LLM_COMPASS_STORAGE_PATH")
@@ -69,6 +70,17 @@ class Settings:
 
     def get_db_url(self) -> str:
         return f"sqlite:///{self.get_db_path()}"
+
+    def make_llm(self, model: str, **kwargs):
+        """Create a ChatOpenAI instance pre-configured for OpenRouter."""
+        from langchain_openai import ChatOpenAI  # lazy import — optional at config level
+
+        return ChatOpenAI(
+            model=model,
+            api_key=SecretStr(self.openrouter_api_key),
+            base_url=self.openrouter_base_url,
+            **kwargs,
+        )
 
 
 # lru_cache effectively Singleton behavior on get_settings()

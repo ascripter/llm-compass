@@ -9,8 +9,8 @@ from typing import Any
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
+from llm_compass.config import Settings
 from llm_compass.common.schemas import Constraints
 from ..schemas import IntentExtraction, QueryExpansion
 from ..state import AgentState
@@ -59,7 +59,7 @@ def _ensure_query_count(search_queries: list[str], user_query: str) -> tuple[lis
     return unique[:5], used_fallback
 
 
-def query_refiner_node(state: AgentState) -> dict[str, Any]:
+def query_refiner_node(state: AgentState, settings: Settings) -> dict[str, Any]:
     """
     Refines a validated query (Req 2.3 Node 2).
 
@@ -68,7 +68,7 @@ def query_refiner_node(state: AgentState) -> dict[str, Any]:
             - search_queries: list[str]
             - logs: list[str]
     """
-    llm = ChatOpenAI(model="openai/gpt-oss-120b", temperature=0)
+    llm = settings.make_llm("openai/gpt-oss-120b", temperature=0)
     query_expander = llm.with_structured_output(QueryExpansion)
 
     constraints_raw = state.get("constraints")

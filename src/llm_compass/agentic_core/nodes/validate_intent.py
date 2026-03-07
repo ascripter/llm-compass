@@ -20,8 +20,8 @@ from typing import Any
 import logging
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
+from llm_compass.config import Settings
 from llm_compass.common.schemas import Constraints
 from llm_compass.common.types import MODALITY_VALUES
 from ..state import AgentState
@@ -36,7 +36,7 @@ Your task is to analyze the user's request (and any conversation history) to det
 Extract the intended modalities and determine if the request is specific enough to proceed, strictly following the rules and examples defined in your output schema."""
 
 
-def validate_intent_node(state: AgentState) -> dict[str, Any]:
+def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any]:
     """
     Validates user intent and UI constraint consistency (Req 2.3 Node 1).
 
@@ -64,7 +64,7 @@ def validate_intent_node(state: AgentState) -> dict[str, Any]:
         "- if possible, estimate the amount of tokens for input / output *per modality* "
         "that will occur with an average LLM invocation"
     )
-    llm = ChatOpenAI(model="openai/gpt-oss-120b", temperature=0)
+    llm = settings.make_llm("openai/gpt-oss-120b", temperature=0)
     structured_llm = llm.with_structured_output(IntentExtraction)
     messages = [SystemMessage(INTENT_VALIDATOR_SYSTEM_PROMPT)] + state["messages"]  # type:ignore
     response: IntentExtraction = structured_llm.invoke(messages)  # type: ignore

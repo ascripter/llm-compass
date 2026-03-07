@@ -2,6 +2,8 @@
 Assembles the LangGraph.
 """
 
+from functools import partial
+
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -11,14 +13,16 @@ from .nodes import (
     token_ratio_estimation_node,
     query_refiner_node,
 )
+from llm_compass.config import Settings, get_settings
 
 
-def build_graph():
+def build_graph(settings: Settings | None = None):
+    settings = settings or get_settings()
     workflow = StateGraph(AgentState)
 
-    workflow.add_node("validator", validate_intent_node)
-    workflow.add_node("token_ratio", token_ratio_estimation_node)
-    workflow.add_node("refiner", query_refiner_node)
+    workflow.add_node("validator", partial(validate_intent_node, settings=settings))
+    workflow.add_node("token_ratio", partial(token_ratio_estimation_node, settings=settings))
+    workflow.add_node("refiner", partial(query_refiner_node, settings=settings))
     # workflow.add_node("benchmark_discovery", benchmark_discovery)
     # TODO: add discovery, ranking, synthesis nodes
 
