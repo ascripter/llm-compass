@@ -92,7 +92,8 @@ async def create_query(
         "logs": [],
     }
 
-    result = graph.invoke(initial_state)
+    config = {"configurable": {"thread_id": session_id}}
+    result = graph.invoke(initial_state, config=config)
     state = result if isinstance(result, dict) else initial_state
 
     _sessions[session_id] = state
@@ -121,7 +122,8 @@ async def clarify_query(
     prev_state["clarification_needed"] = False
 
     graph = build_graph()
-    result = graph.invoke(prev_state)
+    config = {"configurable": {"thread_id": session_id}}
+    result = graph.invoke(prev_state, config=config)
     state = result if isinstance(result, dict) else prev_state
 
     _sessions[session_id] = state
