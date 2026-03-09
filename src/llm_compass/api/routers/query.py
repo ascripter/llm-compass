@@ -9,7 +9,7 @@ from ..schemas.query import ClarifyRequest, QueryRequest, QueryResponse, TraceEv
 try:
     from llm_compass.agentic_core.graph import build_graph
 except Exception:  # pragma: no cover - startup fallback when agent deps are unavailable
-    def build_graph() -> Any:
+    def build_graph(settings=None, session=None) -> Any:
         raise RuntimeError("LangGraph build_graph is unavailable")
 
 
@@ -75,10 +75,8 @@ async def create_query(
     _: str = Depends(require_api_key),
     db: object | None = Depends(get_db),
 ) -> QueryResponse:
-    del db
-
     session_id = req.session_id or str(uuid.uuid4())
-    graph = build_graph()
+    graph = build_graph(session=db)
 
     initial_state: dict[str, Any] = {
         "user_query": req.user_query,
@@ -107,8 +105,6 @@ async def clarify_query(
     _: str = Depends(require_api_key),
     db: object | None = Depends(get_db),
 ) -> QueryResponse:
-    del db
-
     prev_state = _sessions.get(session_id)
     if not prev_state:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Session not found"})
@@ -121,7 +117,7 @@ async def clarify_query(
 
     prev_state["clarification_needed"] = False
 
-    graph = build_graph()
+    graph = build_graph(session=db)
     config = {"configurable": {"thread_id": session_id}}
     result = graph.invoke(prev_state, config=config)
     state = result if isinstance(result, dict) else prev_state
