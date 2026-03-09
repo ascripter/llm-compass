@@ -66,9 +66,10 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
     )
 
     logger.debug(
-        "validate_intent_node ENTRY | user_query=%r | clarification_count=%d | messages=%s",
+        "validate_intent_node ENTRY | user_query=%r | clarification_count=%d | constraints=%s | messages=%s",
         state.get("user_query"),
         state.get("clarification_count", 0),
+        state.get("constraints"),
         [f"{type(m).__name__}({getattr(m, 'content', '')[:60]!r})" for m in state.get("messages", [])],
     )
 
@@ -153,9 +154,22 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         state_update["logs"] = logs
 
     logger.debug(
-        "validate_intent_node EXIT | is_specific=%s | clarification_count=%s | reasoning=%r",
+        "validate_intent_node EXIT"
+        " | is_specific=%s"
+        " | clarification_count=%s"
+        " | clarification_limit_exceeded=%s"
+        " | intended_input=%s"
+        " | intended_output=%s"
+        " | messages_appended=%d"
+        " | logs_appended=%d"
+        " | reasoning=%r",
         getattr(response, "is_specific", None),
         state_update.get("clarification_count", state.get("clarification_count", 0)),
+        state_update.get("clarification_limit_exceeded", False),
+        getattr(response, "intended_input_modalities", None),
+        getattr(response, "intended_output_modalities", None),
+        len(state_update.get("messages", [])),
+        len(state_update.get("logs", [])),
         getattr(response, "reasoning", "")[:120],
     )
     return state_update
