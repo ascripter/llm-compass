@@ -17,14 +17,17 @@ from .nodes import (
 from llm_compass.config import Settings, get_settings
 
 
-def build_graph(settings: Settings | None = None):
+def build_graph(settings: Settings | None = None, session=None):
     settings = settings or get_settings()
     workflow = StateGraph(AgentState)
 
     workflow.add_node("validator", partial(validate_intent_node, settings=settings))
     workflow.add_node("token_ratio", partial(token_ratio_estimation_node, settings=settings))
     workflow.add_node("refiner", partial(query_refiner_node, settings=settings))
-    workflow.add_node("benchmark_discovery", partial(benchmark_discovery_node, settings=settings))
+    workflow.add_node(
+        "benchmark_discovery",
+        partial(benchmark_discovery_node, settings=settings, session=session),
+    )
     # TODO: add ranking, synthesis nodes
 
     # Edges
@@ -48,6 +51,5 @@ def build_graph(settings: Settings | None = None):
     workflow.add_conditional_edges("validator", check_validity)
     workflow.add_edge(["token_ratio", "refiner"], "benchmark_discovery")
     # TODO: add edges to ranking, synthesis
-    
 
     return workflow.compile(checkpointer=MemorySaver())

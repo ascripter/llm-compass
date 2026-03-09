@@ -8,6 +8,8 @@ Outputs weighted_benchmarks: List[Dict] with id and weight.
 from typing import List, Dict, Any
 import logging
 
+from sqlalchemy.orm import Session
+
 from llm_compass.config import Settings
 from llm_compass.data.embedding import Embedding
 from llm_compass.data.models import BenchmarkDictionary
@@ -16,7 +18,9 @@ from ..state import AgentState
 logger = logging.getLogger(__name__)
 
 
-def find_relevant_benchmarks(queries: List[str], cutoff_score: float = 0.7) -> List[Dict[str, Any]]:
+def find_relevant_benchmarks(
+    queries: List[str], settings: Settings, session: Session, cutoff_score: float = 0.7
+) -> List[Dict[str, Any]]:
     """
     Perform vector search against the Benchmark Dictionary for each query.
     Aggregate scores if benchmarks appear in multiple results.
@@ -29,13 +33,13 @@ def find_relevant_benchmarks(queries: List[str], cutoff_score: float = 0.7) -> L
     Returns:
         List of dicts: [{"id": "mmlu", "name": "MMLU", "relevance_weight": 0.9}, ...]
     """
-    settings = Settings()
     embedding = Embedding(settings)
 
     # Get all benchmark records
     from llm_compass.data.database import Database
+
     db = Database(settings)
-    with db.get_session() as session:
+    with session:
         records = session.query(BenchmarkDictionary).all()
         records_dict = {record.id: record for record in records}
 
@@ -58,11 +62,7 @@ def find_relevant_benchmarks(queries: List[str], cutoff_score: float = 0.7) -> L
         bench_id = result["id"]
         score = result["score"]
         if bench_id not in benchmark_scores:
-            benchmark_scores[bench_id] = {
-                "total_score": 0.0,
-                "count": 0,
-                "item": result["item"]
-            }
+            benchmark_scores[bench_id] = {"total_score": 0.0, "count": 0, "item": result["item"]}
         benchmark_scores[bench_id]["total_score"] += score
         benchmark_scores[bench_id]["count"] += 1
 
@@ -71,20 +71,26 @@ def find_relevant_benchmarks(queries: List[str], cutoff_score: float = 0.7) -> L
     for bench_id, data in benchmark_scores.items():
         avg_score = data["total_score"] / data["count"]
         if avg_score > cutoff_score:
-            weighted_benchmarks.append({
-                "id": data["item"].normalized_name,
-                "name": data["item"].name,
-                "relevance_weight": round(avg_score, 3)
-            })
+            weighted_benchmarks.append(
+                {
+                    "id": data["item"].normalized_name,
+                    "name": data["item"].name,
+                    "relevance_weight": round(avg_score, 3),
+                }
+            )
 
     # Sort by relevance_weight descending
     weighted_benchmarks.sort(key=lambda x: x["relevance_weight"], reverse=True)
 
-    logger.info(f"Found {len(weighted_benchmarks)} relevant benchmarks from {len(queries)} queries")
+    logger.info(
+        f"Found {len(weighted_benchmarks)} relevant benchmarks from {len(queries)} queries"
+    )
     return weighted_benchmarks
 
 
-def benchmark_discovery_node(state: AgentState, settings: Settings) -> AgentState:
+def benchmark_discovery_node(
+    state: AgentState, *, settings: Settings, session: Session
+) -> AgentState:
     """
     Node 3: Execute find_relevant_benchmarks with search_queries.
     Output: weighted_benchmarks as List[Dict] with id and weight.
@@ -96,11 +102,10 @@ def benchmark_discovery_node(state: AgentState, settings: Settings) -> AgentStat
         return state
 
     try:
-        results = find_relevant_benchmarks(search_queries)
+        results = find_relevant_benchmarks(search_queries, settings=settings, session=session)
         # Transform to the expected output format: [{"id": "...", "weight": 0.9}, ...]
         weighted_benchmarks = [
-            {"id": item["id"], "weight": item["relevance_weight"]}
-            for item in results
+            {"id": item["id"], "weight": item["relevance_weight"]} for item in results
         ]
         state["weighted_benchmarks"] = weighted_benchmarks
         logger.info(f"Set weighted_benchmarks: {len(weighted_benchmarks)} items")
