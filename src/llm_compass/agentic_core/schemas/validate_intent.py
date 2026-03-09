@@ -45,8 +45,10 @@ class IntentExtraction(BaseModel):
         default_factory=list,
         description=(
             "If is_specific is False, provide a list of distinct questions explaining exactly "
-            "what information is missing. Leave empty if is_specific is True, otherwise you MUST "
-            "add least add one entry."
+            "what information is missing. Focus on the following aspects primarily:\n"
+            "- Is the actual use case clear?\n"
+            "- Are input and output modalities clear?\n"
+            "Leave empty if is_specific is True, otherwise you MUST add least add one entry."
         ),
     )
 

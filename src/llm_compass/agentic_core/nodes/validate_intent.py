@@ -64,8 +64,16 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         "- if possible, estimate the amount of tokens for input / output *per modality* "
         "that will occur with an average LLM invocation"
     )
+
+    logger.debug(
+        "validate_intent_node ENTRY | user_query=%r | clarification_count=%d | messages=%s",
+        state.get("user_query"),
+        state.get("clarification_count", 0),
+        [f"{type(m).__name__}({getattr(m, 'content', '')[:60]!r})" for m in state.get("messages", [])],
+    )
+
     # patch: use 4o-mini since gpt-oss-120b doesn't adhere to schema consistently
-    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0) 
+    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0)
     structured_llm = llm.with_structured_output(IntentExtraction)
     messages = [SystemMessage(INTENT_VALIDATOR_SYSTEM_PROMPT)] + state["messages"]  # type:ignore
     response: IntentExtraction = structured_llm.invoke(messages)  # type: ignore
@@ -143,4 +151,11 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
     
     if logs:
         state_update["logs"] = logs
+
+    logger.debug(
+        "validate_intent_node EXIT | is_specific=%s | clarification_count=%s | reasoning=%r",
+        getattr(response, "is_specific", None),
+        state_update.get("clarification_count", state.get("clarification_count", 0)),
+        getattr(response, "reasoning", "")[:120],
+    )
     return state_update
