@@ -5,6 +5,7 @@ Assembles the LangGraph.
 from functools import partial
 
 from langgraph.graph import StateGraph, END
+from sqlalchemy.orm import Session
 
 from .state import AgentState
 from .nodes import (
@@ -14,10 +15,12 @@ from .nodes import (
     benchmark_discovery_node,
 )
 from llm_compass.config import Settings, get_settings
+from llm_compass.data.database import Database
 
 
-def build_graph(settings: Settings | None = None, session=None):
+def build_graph(*, settings: Settings | None = None, session: Session | None = None):
     settings = settings or get_settings()
+    session = session or Database(settings).SessionLocal()
     workflow = StateGraph(AgentState)
 
     workflow.add_node("validator", partial(validate_intent_node, settings=settings))
