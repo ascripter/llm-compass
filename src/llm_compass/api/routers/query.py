@@ -4,14 +4,11 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException
 from langchain_core.messages import HumanMessage
 
+from llm_compass.agentic_core.graph import build_graph
+from llm_compass.agentic_core.state import initial_state
 from ..deps import get_db, require_api_key
 from ..schemas.common import ErrorDetail
 from ..schemas.query import ClarifyRequest, QueryRequest, QueryResponse, TraceEvent, UIComponents
-try:
-    from llm_compass.agentic_core.graph import build_graph
-except Exception:  # pragma: no cover - startup fallback when agent deps are unavailable
-    def build_graph(settings=None, session=None) -> Any:
-        raise RuntimeError("LangGraph build_graph is unavailable")
 
 
 router = APIRouter(prefix="/api/v1", tags=["Query"])
@@ -75,7 +72,9 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
         if reasoning:
             parts.append(reasoning)
         parts.append(f"**Input modalities:** {', '.join(inputs) if inputs else 'none detected'}")
-        parts.append(f"**Output modalities:** {', '.join(outputs) if outputs else 'none detected'}")
+        parts.append(
+            f"**Output modalities:** {', '.join(outputs) if outputs else 'none detected'}"
+        )
 
     token_ratio = state.get("token_ratio_estimation")
     if token_ratio is not None:
@@ -147,7 +146,9 @@ def _build_response(session_id: str, state: dict[str, Any]) -> QueryResponse:
     return QueryResponse(
         session_id=session_id,
         user_query=str(state.get("user_query", "")),
-        applied_constraints=state.get("constraints", {}) if isinstance(state.get("constraints"), dict) else {},
+        applied_constraints=(
+            state.get("constraints", {}) if isinstance(state.get("constraints"), dict) else {}
+        ),
         status=status,  # type: ignore[arg-type]
         clarification_question=clarification_question,
         traceability=_build_traceability(state),
@@ -195,7 +196,9 @@ async def clarify_query(
 ) -> QueryResponse:
     prev_state = _sessions.get(session_id)
     if not prev_state:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Session not found"})
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Session not found"}
+        )
 
     prev_state["constraints"] = req.constraints.model_dump()
 
