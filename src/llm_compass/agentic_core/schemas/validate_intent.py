@@ -10,7 +10,6 @@ from pydantic.json_schema import SkipJsonSchema
 from llm_compass.common.types import Modality, MODALITY_VALUES
 
 
-
 class IntentExtraction(BaseModel):
     """Analyzes a user's task to extract intended input/output modalities
     and determines if the request is specific enough to proceed.
@@ -44,9 +43,14 @@ class IntentExtraction(BaseModel):
     clarification_needed: list[str] = Field(
         default_factory=list,
         description=(
-            "If is_specific is False, provide a list of distinct questions explaining exactly "
-            "what information is missing. Leave empty if is_specific is True, otherwise you MUST "
-            "add least add one entry."
+            "If is_specific is False, provide 1-3 clarification questions about "
+            "what information is missing. Focus ONLY on:\n"
+            "- Whether the use case / task is clear\n"
+            "- Whether input modalities are clear\n"
+            "- Whether output modalities are clear\n"
+            "NEVER ask about: model preferences (open-source vs commercial), "
+            "cost, speed, accuracy, or specific model names.\n"
+            "Leave empty if is_specific is True, otherwise you MUST add at least one entry."
         ),
     )
 

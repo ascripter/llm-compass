@@ -107,6 +107,12 @@ def query_refiner_node(state: AgentState, settings: Settings) -> dict[str, Any]:
         str(state.get("user_query", "")),
     )
 
+    logger.debug(
+        "query_refiner_node EXIT | search_queries=%s | used_fallback=%s",
+        search_queries,
+        used_fallback,
+    )
+
     logs = [
         f"Query Refiner: generated {len(search_queries)} search queries.",
     ]

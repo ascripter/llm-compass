@@ -1,10 +1,29 @@
+import logging
+import logging.config
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from llm_compass.config import get_settings
 from .routers import health_router, query_router
 from .schemas.common import APIError, ErrorDetail
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize logging when the server starts
+    settings = get_settings()
+    settings.setup_app_logging("backend")
+    logger.info("FastAPI backend started")
+    yield
+    # Clean up resources when the server shuts down
+    logger.info("FastAPI backend shutting down")
 
 
 def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
@@ -12,10 +31,7 @@ def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=payload)
 
 
-app = FastAPI(
-    title="LLM Compass API",
-    version="0.1.0",
-)
+app = FastAPI(title="LLM Compass API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,4 +86,3 @@ async def request_validation_exception_handler(
 async def global_handler(request: Request, exc: Exception) -> JSONResponse:
     del request
     return _error_response(500, "INTERNAL_ERROR", str(exc))
-

@@ -1,11 +1,23 @@
 """Main Application Entry Point — Streamlit frontend for the LLM Compass API."""
 
+import logging
 import streamlit as st
 
+from llm_compass.config import get_settings
 from llm_compass.ui.components import sidebar, chat, tables, traceability
 from llm_compass.ui import api_client, transformers
 
+logger = logging.getLogger(__name__)
+
 st.set_page_config(layout="wide", page_title="LLM Benchmark Analyst")
+
+
+@st.cache_resource
+def _init_logging():
+    settings = get_settings()
+    settings.setup_app_logging("frontend")
+    logger.info("Streamlit frontend started")
+    return True
 
 
 def _init_session_state() -> None:
@@ -46,13 +58,14 @@ def _run_query(user_query: str, sidebar_constraints: dict) -> None:
         st.session_state.messages.append({"role": "assistant", "content": summary})
 
 
-def _run_clarify(user_reply: str) -> None:
+def _run_clarify(user_reply: str, sidebar_constraints: dict) -> None:
     session_id = st.session_state.session_id
     if not session_id:
         st.error("No active session to clarify.")
         return
+    constraints = transformers.sidebar_to_constraints(sidebar_constraints)
     try:
-        raw = api_client.post_clarify(session_id, user_reply)
+        raw = api_client.post_clarify(session_id, user_reply, constraints)
     except Exception as exc:
         st.error(f"API error: {exc}")
         return
@@ -71,6 +84,7 @@ def _run_clarify(user_reply: str) -> None:
 
 
 def main() -> None:
+    _init_logging()
     _init_session_state()
 
     sidebar_constraints = sidebar.render_sidebar()
@@ -84,7 +98,7 @@ def main() -> None:
             st.session_state.messages.append({"role": "user", "content": prompt})
 
             if st.session_state.status == "needs_clarification":
-                _run_clarify(prompt)
+                _run_clarify(prompt, sidebar_constraints)
             else:
                 _run_query(prompt, sidebar_constraints)
 

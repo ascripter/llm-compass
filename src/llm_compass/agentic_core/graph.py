@@ -5,7 +5,6 @@ Assembles the LangGraph.
 from functools import partial
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 
 from .state import AgentState
 from .nodes import (
@@ -45,11 +44,11 @@ def build_graph(settings: Settings | None = None, session=None):
         else:
             is_specific = bool(intent_extraction.is_specific)
         if is_specific is False:
-            return "validator"
+            return END  # API layer handles clarification via /clarify endpoint
         return ["token_ratio", "refiner"]
 
     workflow.add_conditional_edges("validator", check_validity)
     workflow.add_edge(["token_ratio", "refiner"], "benchmark_discovery")
     # TODO: add edges to ranking, synthesis
 
-    return workflow.compile(checkpointer=MemorySaver())
+    return workflow.compile()

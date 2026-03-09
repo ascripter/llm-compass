@@ -23,6 +23,7 @@ class ClarifyRequest(BaseModel):
     """Follow-up message when the agent asks for clarification."""
 
     user_reply: str = Field(..., min_length=1, max_length=2000)
+    constraints: Constraints = Constraints()
 
 
 class TraceEvent(BaseModel):

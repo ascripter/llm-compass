@@ -47,6 +47,13 @@ def token_ratio_estimation_node(state: AgentState, settings: Settings) -> dict[s
     messages = [SystemMessage(content=_system_prompt(history))] + history
     token_ratio: TokenRatioEstimation = token_estimator.invoke(messages)  # type: ignore
 
+    logger.debug(
+        "token_ratio_estimation_node EXIT | input_ratios=%s | output_ratios=%s | reasoning=%r",
+        token_ratio.normalized_input_ratios,
+        token_ratio.normalized_output_ratios,
+        getattr(token_ratio, "reasoning", "")[:120],
+    )
+
     logs = [
         (
             "Token Ratio Estimation: "

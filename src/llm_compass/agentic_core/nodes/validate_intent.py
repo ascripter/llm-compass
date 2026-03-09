@@ -32,8 +32,27 @@ logger = logging.getLogger(__name__)
 # System prompt for the LLM-based validator
 INTENT_VALIDATOR_SYSTEM_PROMPT = """You are an intent validation assistant in an AI routing pipeline.
 
-Your task is to analyze the user's request (and any conversation history) to determine their intended task. 
-Extract the intended modalities and determine if the request is specific enough to proceed, strictly following the rules and examples defined in your output schema."""
+## Your Task
+Analyze the user's request (and any conversation history) to:
+1. Determine their intended task.
+2. Extract the intended input and output modalities.
+3. Assess whether the request is specific enough to proceed.
+
+Follow the rules and examples defined in your output schema.
+
+## Clarification Scope
+When the request is unclear, ask ONLY about:
+- The actual use case or task description.
+- Input modalities (text, image, audio, video).
+- Output modalities (text, image, audio, video).
+
+## Strict Rules
+You MUST NOT ask about or mention ANY of the following topics. This is non-negotiable:
+- Open-source vs commercial or proprietary model preferences.
+- Cost or pricing sensitivity.
+- Model speed or latency requirements.
+- General accuracy or benchmark performance.
+- Specific model names or providers."""
 
 
 def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any]:
@@ -64,8 +83,20 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         "- if possible, estimate the amount of tokens for input / output *per modality* "
         "that will occur with an average LLM invocation"
     )
+
+    logger.debug(
+        "validate_intent_node ENTRY | user_query=%r | clarification_count=%d | constraints=%s | messages=%s",
+        state.get("user_query"),
+        state.get("clarification_count", 0),
+        state.get("constraints"),
+        [
+            f"{type(m).__name__}({getattr(m, 'content', '')[:60]!r})"
+            for m in state.get("messages", [])
+        ],
+    )
+
     # patch: use 4o-mini since gpt-oss-120b doesn't adhere to schema consistently
-    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0) 
+    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0)
     structured_llm = llm.with_structured_output(IntentExtraction)
     messages = [SystemMessage(INTENT_VALIDATOR_SYSTEM_PROMPT)] + state["messages"]  # type:ignore
     response: IntentExtraction = structured_llm.invoke(messages)  # type: ignore
@@ -81,7 +112,23 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         "intent_extraction": response,
     }
 
-    if not response.is_specific and clarification_count >= 3:
+    # Check if query is consistent with UI constraints
+    ui_missing_input = [
+        _ for _ in response.intended_input_modalities if _ not in constraints.modality_input
+    ]
+    ui_missing_output = [
+        _ for _ in response.intended_output_modalities if _ not in constraints.modality_input
+    ]
+    ui_overspec_input = [
+        _ for _ in constraints.modality_input if _ not in response.intended_input_modalities
+    ]
+    ui_overspec_output = [
+        _ for _ in constraints.modality_output if _ not in response.intended_output_modalities
+    ]
+    ui_mismatch = ui_missing_input or ui_missing_output or ui_overspec_input or ui_overspec_output
+
+    if (not response.is_specific or ui_mismatch) and clarification_count >= 3:
+        # trials exceeded
         msg = (
             "I've asked for clarification multiple times, but I'm still unable to understand "
             "your request properly. Please start over and be as specific as possible:\n"
@@ -92,55 +139,61 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         )
         state_update["clarification_limit_exceeded"] = True
         state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
-    elif not response.is_specific:
-        # Format the list of clarification questions into a single cohesive message
-        if len(response.clarification_needed) == 0:
-            # Shouldn't happen since LLM was instructed to provide 1 entry, but *can* happen
-            msg: str = f"This is too vague. Please be as specific as possible:\n{hints_msg}"
-        elif len(response.clarification_needed) == 1:
-            msg: str = response.clarification_needed[0]
-        else:
-            msg: str = "Please clarify the following points:\n" + "\n".join(
-                f"- {q}" for q in response.clarification_needed
-            )
-        logs.append(
-            f"Intent Validator: Response not specific:\n'''{msg}'''"
-        )
-        # Append this AIMessage to the conversation history
+    elif not response.is_specific or ui_mismatch:
         state_update["clarification_count"] = clarification_count + 1
-        state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
-    else:
-        # valid response. Now check if consistent with UI constraints
-        ui_missing_input = [
-            _ for _ in response.intended_input_modalities if _ not in constraints.modality_input
-        ]
-        ui_missing_output = [
-            _ for _ in response.intended_output_modalities if _ not in constraints.modality_input
-        ]
-        ui_overspec_input = [
-            _ for _ in constraints.modality_input if _ not in response.intended_input_modalities
-        ]
-        ui_overspec_output = [
-            _ for _ in constraints.modality_output if _ not in response.intended_output_modalities
-        ]
         msg = ""
-        if ui_missing_input or ui_missing_output or ui_overspec_input or ui_overspec_output:
-            response.is_specific = False  # "patch" the value manually
-            state_update["clarification_count"] = clarification_count + 1
-        
+        if not response.is_specific:
+            # Format the list of clarification questions into a single cohesive message
+            if len(response.clarification_needed) == 0:
+                # Shouldn't happen since LLM was instructed to provide 1 entry, but *can* happen
+                msg += f"This is too vague. Please be as specific as possible:\n{hints_msg}"
+            elif len(response.clarification_needed) == 1:
+                msg += response.clarification_needed[0]
+            else:
+                msg += "Please clarify the following points:\n" + "\n".join(
+                    f"- {q}" for q in response.clarification_needed
+                )
+            logs.append(f"Intent Validator: Response not specific:\n'''{msg}'''")
+            msg += "\n\n"
+
+        if ui_mismatch:
+            # Add info about modality mismatch
             msg += "Your task indicates the following modalities:\n"
             msg += f"- input: {response.intended_input_modalities}\n"
             msg += f"- output: {response.intended_output_modalities}\n\n"
             msg += "This conflicts with your selection in the UI. Please change *either* the UI "
             msg += "filters or clarify which input and output modalities you intend to use."
             logs.append(
-                ("Intent Validator: Modality-mismatch.\nMissing UI input: "
-                 f"{ui_missing_input}; and output: {ui_missing_output}.\n"
-                 "Overspec UI input: {ui_overspec_input}; and output: {ui_overspec_output}")
+                (
+                    "Intent Validator: Modality-mismatch.\nMissing UI input: "
+                    f"{ui_missing_input}; and output: {ui_missing_output}.\n"
+                    "Overspec UI input: {ui_overspec_input}; and output: {ui_overspec_output}"
+                )
             )
-            state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
-        
-    
+
+        # Append this AIMessage to the conversation history
+        state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
+
     if logs:
         state_update["logs"] = logs
+
+    logger.debug(
+        "validate_intent_node EXIT"
+        " | is_specific=%s"
+        " | clarification_count=%s"
+        " | clarification_limit_exceeded=%s"
+        " | intended_input=%s"
+        " | intended_output=%s"
+        " | messages_appended=%d"
+        " | logs_appended=%d"
+        " | reasoning=%r",
+        getattr(response, "is_specific", None),
+        state_update.get("clarification_count", state.get("clarification_count", 0)),
+        state_update.get("clarification_limit_exceeded", False),
+        getattr(response, "intended_input_modalities", None),
+        getattr(response, "intended_output_modalities", None),
+        len(state_update.get("messages", [])),
+        len(state_update.get("logs", [])),
+        getattr(response, "reasoning", "")[:120],
+    )
     return state_update
