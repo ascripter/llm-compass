@@ -23,14 +23,18 @@ class AgentState(MessagesState):
     clarification_count: int  # Tracks cycles; max 3 before terminal error
     clarification_limit_exceeded: bool
     intent_extraction: Optional[IntentExtraction]
-    token_ratio_estimation: Optional[TokenRatioEstimation]
 
     # From Query Refinement (Req 2.3 Node 2)
+    token_ratio_estimation: Optional[TokenRatioEstimation]
     search_queries: List[str]
 
-    # rest t.b.d.
-    # Results
-    ranked_results: Dict[str, List[Any]]  # Top, Balanced, Budget lists
+    # From Benchmark Discovery (Req 2.3 Node 3)
+    weighted_benchmarks: List[Dict[str, Any]]
+
+    # From Scoring and Ranking (Req 2.3 Node 4)
+    ranked_results: Dict[str, List[Any]]  # "top", "balanced", "budget" lists
+    
+    # From Synthesize Node (Req 2.3 Node 5)
     final_response: Optional[Dict]  # The JSON schema for UI
 
     # Traceability (Req 3.3.A)

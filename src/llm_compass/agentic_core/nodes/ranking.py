@@ -1,24 +1,27 @@
 """
-Implements the core analytical tools called by the Agent.
-Req 2.2: Semantic search and Ranking logic.
-"""
+Req 2.3 Node 4: Scoring and Ranking
 
+This node runs after benchmark discovery.
+It finds LLMs for relevant benchmarks, scores and ranks them.
+"""
 from typing import List, Dict, Any, Optional, Tuple
+import logging
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from llm_compass.config import Settings
+from llm_compass.common.schemas import Constraints
+from llm_compass.data.models import LLMMetadata, BenchmarkScore, BenchmarkDictionary
+from ..schemas import IntentExtraction, QueryExpansion
+from ..state import AgentState
+
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 import numpy as np
 
-from ..data.models import LLMMetadata, BenchmarkScore, BenchmarkDictionary
 
+logger = logging.getLogger(__name__)
 
-def find_relevant_benchmarks(queries: list[str], session: Session) -> list[dict]:
-    """
-    Req 2.2.A: Semantic search against BenchmarkDictionary.
-    Returns: List of {id, name, relevance_weight}
-    """
-    # TODO: Implement vector search using embeddings
-    # For now, return empty placeholder
-    pass
 
 
 def _calculate_blended_cost(
@@ -417,3 +420,30 @@ def retrieve_and_rank_models(
             "benchmark_weights": [bw.get("weight", 0) for bw in benchmark_weights]
         }
     }
+
+
+def execute_ranking(state: AgentState) -> AgentState:
+    """
+    Wrapper for retrieve_and_rank_models tool.
+    """
+    # Extract the required parameters from state
+    benchmark_weights = state.get("weighted_benchmarks", [])
+    constraints = state.get("constraints", {})
+    token_ratio_estimation = state.get("token_ratio_estimation", {})
+    
+    # Get database session - this would typically be injected or managed elsewhere
+    # For now, we'll assume it's available in the state or through a dependency
+    # In a real implementation, this would come from the database dependency injection
+    
+    # Call the retrieve_and_rank_models function
+    ranked_results = retrieve_and_rank_models(
+        benchmark_weights=benchmark_weights,
+        constraints=constraints,
+        token_ratio_estimation=token_ratio_estimation,
+        session=state.get("db_session")  # This should be provided by the framework
+    )
+    
+    # Update the state with the results
+    state["ranked_results"] = ranked_results
+    
+    return state
