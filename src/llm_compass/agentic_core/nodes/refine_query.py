@@ -69,7 +69,7 @@ def query_refiner_node(state: AgentState, settings: Settings) -> dict[str, Any]:
             - logs: list[str]
     """
     # patch: use 4o-mini since gpt-oss-120b doesn't adhere to schema consistently
-    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0)
+    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0.7)
     query_expander = llm.with_structured_output(QueryExpansion)
 
     constraints_raw = state.get("constraints")
@@ -97,9 +97,11 @@ def query_refiner_node(state: AgentState, settings: Settings) -> dict[str, Any]:
         )
     context = "\n".join(context_lines)
 
-    query_messages = [SystemMessage(content=QUERY_EXPANSION_SYSTEM_PROMPT)] + messages + [
-        HumanMessage(content=context)
-    ]
+    query_messages = (
+        [SystemMessage(content=QUERY_EXPANSION_SYSTEM_PROMPT)]
+        + messages
+        + [HumanMessage(content=context)]
+    )
     query_expansion: QueryExpansion = query_expander.invoke(query_messages)  # type: ignore[assignment]
 
     search_queries, used_fallback = _ensure_query_count(
