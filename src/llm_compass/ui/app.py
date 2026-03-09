@@ -1,11 +1,23 @@
 """Main Application Entry Point — Streamlit frontend for the LLM Compass API."""
 
+import logging
 import streamlit as st
 
+from llm_compass.config import get_settings
 from llm_compass.ui.components import sidebar, chat, tables, traceability
 from llm_compass.ui import api_client, transformers
 
+logger = logging.getLogger(__name__)
+
 st.set_page_config(layout="wide", page_title="LLM Benchmark Analyst")
+
+
+@st.cache_resource
+def _init_logging():
+    settings = get_settings()
+    settings.setup_app_logging("frontend")
+    logger.info("Streamlit frontend started")
+    return True
 
 
 def _init_session_state() -> None:
@@ -71,6 +83,7 @@ def _run_clarify(user_reply: str) -> None:
 
 
 def main() -> None:
+    _init_logging()
     _init_session_state()
 
     sidebar_constraints = sidebar.render_sidebar()

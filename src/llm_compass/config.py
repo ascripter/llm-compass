@@ -6,16 +6,23 @@ application constants.
 """
 
 import os
+import logging
+import logging.config
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Optional
 
 from dotenv import load_dotenv
 from pydantic import SecretStr
 
 
-_MANDATORY_ENV_VARS = ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "LLM_COMPASS_STORAGE_PATH")
+_MANDATORY_ENV_VARS = (
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    "LLM_COMPASS_STORAGE_PATH",
+    "LLM_COMPASS_LOG_PATH",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +32,11 @@ class Settings:
     openrouter_api_key: str
     openrouter_base_url: str
     storage_path: Path
+    log_path: Path
+    log_file_level_backend: str
+    log_console_level_backend: str
+    log_file_level_frontend: str
+    log_console_level_frontend: str
 
     @classmethod
     def from_env(
@@ -36,6 +48,11 @@ class Settings:
         project_root: Path | None = None,
         repo_root: Path | None = None,
         create_storage_dir: bool = True,
+        create_log_dir: bool = True,
+        log_file_level_backend: str = "DEBUG",
+        log_console_level_backend: str = "INFO",
+        log_file_level_frontend: str = "DEBUG",
+        log_console_level_frontend: str = "INFO",
     ) -> "Settings":
         # By default, load_dotenv() does not override already-set env vars
         if load_dotenv_file:
@@ -48,8 +65,11 @@ class Settings:
             raise ValueError(f"Missing env vars: {', '.join(missing)}")
 
         storage = Path(source["LLM_COMPASS_STORAGE_PATH"]).expanduser().resolve()
+        log_path = Path(source["LLM_COMPASS_LOG_PATH"]).expanduser().resolve()
         if create_storage_dir:
             storage.mkdir(parents=True, exist_ok=True)
+        if create_log_dir:
+            log_path.mkdir(parents=True, exist_ok=True)
 
         return cls(
             project_root=project_root or Path(__file__).absolute().parent,
@@ -57,6 +77,11 @@ class Settings:
             openrouter_api_key=source["OPENROUTER_API_KEY"],
             openrouter_base_url=source["OPENROUTER_BASE_URL"],
             storage_path=storage,
+            log_path=log_path,
+            log_file_level_backend=log_file_level_backend,
+            log_console_level_backend=log_console_level_backend,
+            log_file_level_frontend=log_file_level_frontend,
+            log_console_level_frontend=log_console_level_frontend,
         )
 
     def get_benchmark_description_csv(self) -> Path:
@@ -81,6 +106,59 @@ class Settings:
             base_url=self.openrouter_base_url,
             **kwargs,
         )
+
+    def setup_app_logging(self, name: str) -> logging.Logger:
+        """
+        Configures the root logger for the calling application.
+        """
+        assert name in ("backend", "frontend")
+        filename = f"{name}.log"
+
+        config = {
+            "version": 1,
+            "disable_existing_loggers": False,  # crucial: keeps module loggers active
+            "formatters": {
+                "console": {"format": "%(name)s - %(levelname)s: %(message)s"},
+                "file": {"format": "[%(asctime)s] %(name)s - %(levelname)s: %(message)s"},
+            },
+            "handlers": {
+                "console": {
+                    "class": "logging.StreamHandler",
+                    "level": getattr(self, f"log_console_level_{name}"),
+                    "formatter": "console",
+                },
+                "file": {
+                    "class": "logging.handlers.RotatingFileHandler",
+                    "level": getattr(self, f"log_file_level_{name}"),
+                    "formatter": "file",
+                    "filename": str(Path(self.log_path, filename)),
+                    "maxBytes": 10485760,  # Rotates at 10MB
+                    "backupCount": 5,  # Keeps 5 historical log files
+                    "encoding": "utf8",
+                },
+            },
+            "loggers": {},
+            "root": {
+                "level": "DEBUG",
+                "handlers": ["console", "file"],
+            },
+        }
+
+        # The following modules will only log WARNING and ERROR level
+        silence_modules = [
+            "httpcore.http11",
+            "httpcore.connection",
+            "uvicorn.access",
+            "uvicorn.error",
+        ]
+        for module in silence_modules:
+            config["loggers"][module] = {"level": "WARNING", "propagate": False}
+
+        # Apply the configuration to the process
+        logging.config.dictConfig(config)
+
+        # Return a generic logger instance just in case the caller wants it immediately
+        return logging.getLogger(__name__)
 
 
 # lru_cache effectively Singleton behavior on get_settings()
