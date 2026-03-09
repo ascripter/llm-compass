@@ -22,6 +22,7 @@ class AgentState(MessagesState):
     # From intent validation node (Req 2.3 Node 1)
     clarification_count: int  # Tracks cycles; max 3 before terminal error
     clarification_limit_exceeded: bool
+    ui_mismatch_hinted: bool  # True: user was hinted at mismatch between UI/query modalities
     intent_extraction: Optional[IntentExtraction]
 
     # From Query Refinement (Req 2.3 Node 2)

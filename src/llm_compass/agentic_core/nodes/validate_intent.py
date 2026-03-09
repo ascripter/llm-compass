@@ -106,6 +106,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
     constraints = Constraints(**_raw) if isinstance(_raw, dict) else _raw
 
     clarification_count = state.get("clarification_count", 0)
+    ui_mismatch_hinted = state.get("ui_mismatch_hinted", False)
     logs = []
 
     state_update: dict[str, Any] = {
@@ -127,7 +128,10 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
     ]
     ui_mismatch = ui_missing_input or ui_missing_output or ui_overspec_input or ui_overspec_output
 
-    if (not response.is_specific or ui_mismatch) and clarification_count >= 3:
+    # Only trigger clarification for mismatch if user hasn't been hinted yet
+    effective_ui_mismatch = ui_mismatch and not ui_mismatch_hinted
+
+    if (not response.is_specific or effective_ui_mismatch) and clarification_count >= 3:
         # trials exceeded
         msg = (
             "I've asked for clarification multiple times, but I'm still unable to understand "
@@ -139,7 +143,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         )
         state_update["clarification_limit_exceeded"] = True
         state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
-    elif not response.is_specific or ui_mismatch:
+    elif not response.is_specific or effective_ui_mismatch:
         state_update["clarification_count"] = clarification_count + 1
         msg = ""
         if not response.is_specific:
@@ -156,7 +160,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
             logs.append(f"Intent Validator: Response not specific:\n'''{msg}'''")
             msg += "\n\n"
 
-        if ui_mismatch:
+        if effective_ui_mismatch:
             # Add info about modality mismatch
             msg += "Your task indicates the following modalities:\n"
             msg += f"- input: {response.intended_input_modalities}\n"
@@ -170,6 +174,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
                     "Overspec UI input: {ui_overspec_input}; and output: {ui_overspec_output}"
                 )
             )
+            state_update["ui_mismatch_hinted"] = True
 
         # Append this AIMessage to the conversation history
         state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
