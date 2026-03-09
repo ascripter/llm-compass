@@ -5,6 +5,7 @@ This node runs after benchmark discovery.
 It finds LLMs for relevant benchmarks, scores and ranks them.
 """
 from typing import List, Dict, Any, Optional, Tuple
+import copy
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -356,23 +357,25 @@ def retrieve_and_rank_models(
         mr["blended_cost_index"] = normalized_costs[i]
     
     # Step 5: Generate ranking lists
+    # Each list gets its own deep copy so metadata annotation and field removal
+    # on one list do not corrupt the dicts shared with the other lists.
     # Performance List: Ranked by Performance_Index
     top_performance = sorted(
-        model_results,
+        copy.deepcopy(model_results),
         key=lambda x: x["performance_index"],
         reverse=True
     )
-    
+
     # Budget List: Ranked by 0.2 * Performance_Index + 0.8 * Blended_Cost_Index
     budget = sorted(
-        model_results,
+        copy.deepcopy(model_results),
         key=lambda x: 0.2 * x["performance_index"] + 0.8 * x["blended_cost_index"],
         reverse=True
     )
-    
+
     # Balanced List: Ranked by 0.5 * Performance_Index + 0.5 * Blended_Cost_Index
     balanced = sorted(
-        model_results,
+        copy.deepcopy(model_results),
         key=lambda x: 0.5 * x["performance_index"] + 0.5 * x["blended_cost_index"],
         reverse=True
     )
@@ -422,28 +425,27 @@ def retrieve_and_rank_models(
     }
 
 
-def execute_ranking(state: AgentState) -> AgentState:
+def execute_ranking(state: AgentState, *, session: Session) -> AgentState:
     """
     Wrapper for retrieve_and_rank_models tool.
+    Receives a database session via partial() injection (same pattern as Settings).
     """
-    # Extract the required parameters from state
-    benchmark_weights = state.get("weighted_benchmarks", [])
-    constraints = state.get("constraints", {})
-    token_ratio_estimation = state.get("token_ratio_estimation", {})
-    
-    # Get database session - this would typically be injected or managed elsewhere
-    # For now, we'll assume it's available in the state or through a dependency
-    # In a real implementation, this would come from the database dependency injection
-    
-    # Call the retrieve_and_rank_models function
+    constraints_val = state.get("constraints")
+    constraints: Dict[str, Any] = constraints_val.model_dump() if isinstance(constraints_val, Constraints) else (constraints_val or {})  # type: ignore[assignment]
+
+    token_ratio_val = state.get("token_ratio_estimation")
+    if token_ratio_val is None:
+        token_ratio_estimation: Dict[str, Any] = {}
+    elif isinstance(token_ratio_val, dict):
+        token_ratio_estimation = token_ratio_val
+    else:
+        token_ratio_estimation = token_ratio_val.model_dump()
+
     ranked_results = retrieve_and_rank_models(
-        benchmark_weights=benchmark_weights,
+        benchmark_weights=state.get("weighted_benchmarks", []),
         constraints=constraints,
         token_ratio_estimation=token_ratio_estimation,
-        session=state.get("db_session")  # This should be provided by the framework
+        session=session,
     )
-    
-    # Update the state with the results
     state["ranked_results"] = ranked_results
-    
     return state
