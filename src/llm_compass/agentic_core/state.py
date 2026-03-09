@@ -33,9 +33,30 @@ class AgentState(MessagesState):
 
     # From Scoring and Ranking (Req 2.3 Node 4)
     ranked_results: Dict[str, List[Any]]  # "top", "balanced", "budget" lists
-    
+
     # From Synthesize Node (Req 2.3 Node 5)
     final_response: Optional[Dict]  # The JSON schema for UI
 
     # Traceability (Req 3.3.A)
     logs: Annotated[List[str], add_messages]
+
+
+def get_initial_state():
+    """Caller needs to update the keys "messages", "user_query" and "constraints" """
+    return AgentState(
+        {
+            "messages": [],
+            "user_query": "",
+            "constraints": Constraints(),
+            "clarification_count": 0,
+            "clarification_limit_exceeded": False,
+            "ui_mismatch_hinted": False,
+            "intent_extraction": None,
+            "token_ratio_estimation": None,
+            "search_queries": [],
+            "weighted_benchmarks": [],
+            "ranked_results": {},
+            "final_response": None,
+            "logs": [],
+        }
+    )

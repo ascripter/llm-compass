@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from langchain_core.messages import HumanMessage
 
 from llm_compass.agentic_core.graph import build_graph
-from llm_compass.agentic_core.state import initial_state
+from llm_compass.agentic_core.state import get_initial_state, AgentState
 from ..deps import get_db, require_api_key
 from ..schemas.common import ErrorDetail
 from ..schemas.query import ClarifyRequest, QueryRequest, QueryResponse, TraceEvent, UIComponents
@@ -14,7 +14,7 @@ from ..schemas.query import ClarifyRequest, QueryRequest, QueryResponse, TraceEv
 router = APIRouter(prefix="/api/v1", tags=["Query"])
 
 # In-memory session store (MVP)
-_sessions: dict[str, dict[str, Any]] = {}
+_sessions: dict[str, dict[str, Any] | AgentState] = {}
 
 
 def _build_traceability(state: dict[str, Any]) -> dict[str, List[TraceEvent]]:
@@ -166,18 +166,10 @@ async def create_query(
 ) -> QueryResponse:
     session_id = req.session_id or str(uuid.uuid4())
     graph = build_graph(session=db)
-
-    initial_state: dict[str, Any] = {
-        "user_query": req.user_query,
-        "constraints": req.constraints.model_dump(),
-        "messages": [HumanMessage(req.user_query)],
-        "clarification_count": 0,
-        "clarification_limit_exceeded": False,
-        "search_queries": [],
-        "ranked_results": {},
-        "final_response": None,
-        "logs": [],
-    }
+    initial_state = get_initial_state()
+    initial_state["user_query"] = req.user_query
+    initial_state["constraints"] = req.constraints  # .model_dump()
+    initial_state["messages"] = [HumanMessage(req.user_query)]
 
     config = {"configurable": {"thread_id": session_id}}
     result = graph.invoke(initial_state, config=config)

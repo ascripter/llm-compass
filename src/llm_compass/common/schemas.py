@@ -10,14 +10,13 @@ from pydantic import BaseModel, Field
 from .types import Modality, ReasoningType, SpeedClass, DeploymentType
 
 
-
 class Constraints(BaseModel):
     """Common constraint definition used by API and graph.
 
     Maps 1:1 to UI constraint panel (Req 3.2).
     """
 
-    min_context_window: int = Field(0, ge=0)
+    min_context_window: int = Field(default=0, ge=0)
     modality_input: List[Modality] = Field(default_factory=lambda: ["text"])
     modality_output: List[Modality] = Field(default_factory=lambda: ["text"])
     deployment: DeploymentType = "any"
