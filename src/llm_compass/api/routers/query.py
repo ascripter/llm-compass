@@ -201,6 +201,8 @@ async def clarify_query(
     if not prev_state:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Session not found"})
 
+    prev_state["constraints"] = req.constraints.model_dump()
+
     msgs = list(prev_state.get("messages", []))
     msgs.append(HumanMessage(req.user_reply))
     prev_state["messages"] = msgs

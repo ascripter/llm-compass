@@ -30,10 +30,15 @@ def post_query(user_query: str, constraints: dict) -> dict:
         return data
 
 
-def post_clarify(session_id: str, user_reply: str) -> dict:
+def post_clarify(session_id: str, user_reply: str, constraints: dict) -> dict:
     """POST /api/v1/query/{session_id}/clarify — send clarification."""
-    payload = {"user_reply": user_reply}
-    logger.debug("post_clarify REQUEST | session_id=%s | user_reply=%r", session_id, user_reply)
+    payload = {"user_reply": user_reply, "constraints": constraints}
+    logger.debug(
+        "post_clarify REQUEST | session_id=%s | user_reply=%r | constraints=%s",
+        session_id,
+        user_reply,
+        constraints,
+    )
     with httpx.Client(timeout=_TIMEOUT) as client:
         resp = client.post(
             f"{_API_URL}/api/v1/query/{session_id}/clarify",

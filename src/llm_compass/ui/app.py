@@ -58,13 +58,14 @@ def _run_query(user_query: str, sidebar_constraints: dict) -> None:
         st.session_state.messages.append({"role": "assistant", "content": summary})
 
 
-def _run_clarify(user_reply: str) -> None:
+def _run_clarify(user_reply: str, sidebar_constraints: dict) -> None:
     session_id = st.session_state.session_id
     if not session_id:
         st.error("No active session to clarify.")
         return
+    constraints = transformers.sidebar_to_constraints(sidebar_constraints)
     try:
-        raw = api_client.post_clarify(session_id, user_reply)
+        raw = api_client.post_clarify(session_id, user_reply, constraints)
     except Exception as exc:
         st.error(f"API error: {exc}")
         return
@@ -97,7 +98,7 @@ def main() -> None:
             st.session_state.messages.append({"role": "user", "content": prompt})
 
             if st.session_state.status == "needs_clarification":
-                _run_clarify(prompt)
+                _run_clarify(prompt, sidebar_constraints)
             else:
                 _run_query(prompt, sidebar_constraints)
 
