@@ -5,7 +5,7 @@ from llm_compass.api.routers import query as query_router
 
 
 class FakeGraph:
-    def invoke(self, state: dict) -> dict:
+    def invoke(self, state: dict, config=None) -> dict:
         return {
             **state,
             "clarification_needed": False,
@@ -19,7 +19,7 @@ def _auth_headers() -> dict[str, str]:
 
 
 def test_query_requires_api_key(monkeypatch):
-    monkeypatch.setattr(query_router, "build_graph", lambda: FakeGraph())
+    monkeypatch.setattr(query_router, "get_graph", lambda: FakeGraph())
     query_router._sessions.clear()
 
     client = TestClient(app)
@@ -35,7 +35,7 @@ def test_query_requires_api_key(monkeypatch):
 
 
 def test_query_returns_session_id_and_status(monkeypatch):
-    monkeypatch.setattr(query_router, "build_graph", lambda: FakeGraph())
+    monkeypatch.setattr(query_router, "get_graph", lambda: FakeGraph())
     query_router._sessions.clear()
 
     client = TestClient(app)
@@ -52,7 +52,7 @@ def test_query_returns_session_id_and_status(monkeypatch):
 
 
 def test_clarify_endpoint_returns_query_response(monkeypatch):
-    monkeypatch.setattr(query_router, "build_graph", lambda: FakeGraph())
+    monkeypatch.setattr(query_router, "get_graph", lambda: FakeGraph())
     query_router._sessions.clear()
 
     client = TestClient(app)
@@ -73,4 +73,3 @@ def test_clarify_endpoint_returns_query_response(monkeypatch):
     payload = clarify.json()
     assert payload["session_id"] == session_id
     assert payload["status"] in {"ok", "needs_clarification", "error"}
-

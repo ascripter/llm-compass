@@ -9,10 +9,11 @@ from typing import List, Dict, Any
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from langchain_core.runnables import RunnableConfig
 from sqlalchemy.orm import Session
 
 from llm_compass.config import Settings
-from llm_compass.data.embedding import Embedding
+from llm_compass.data.embedding import get_embedding
 from llm_compass.data.models import BenchmarkDictionary
 from ..state import AgentState
 
@@ -34,7 +35,7 @@ def find_relevant_benchmarks(
     Returns:
         List of dicts: [{"id": "mmlu", "name": "MMLU", "relevance_weight": 0.9}, ...]
     """
-    embedding = Embedding(settings)
+    embedding = get_embedding(settings)
 
     with session:
         records = session.query(BenchmarkDictionary).all()
@@ -71,7 +72,7 @@ def find_relevant_benchmarks(
     # Calculate average relevance weight and filter
     weighted_benchmarks = []
     for bench_id, data in benchmark_scores.items():
-        avg_score = data["total_score"] / data["count"]
+        avg_score = data["score"] / data["count"]
         if avg_score > cutoff_score:
             weighted_benchmarks.append(
                 {
@@ -91,7 +92,7 @@ def find_relevant_benchmarks(
 
 
 def benchmark_discovery_node(
-    state: AgentState, *, settings: Settings, session: Session
+    state: AgentState, config: RunnableConfig, *, settings: Settings
 ) -> AgentState:
     """
     Node 3: Execute find_relevant_benchmarks with search_queries.
@@ -103,6 +104,7 @@ def benchmark_discovery_node(
         state["weighted_benchmarks"] = []
         return state
 
+    session: Session = config["configurable"]["session"]
     try:
         results = find_relevant_benchmarks(search_queries, settings=settings, session=session)
         # Transform to the expected output format: [{"id": "...", "weight": 0.9}, ...]

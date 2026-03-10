@@ -9,14 +9,14 @@ import copy
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+from sqlalchemy.orm import Session
 
 from llm_compass.config import Settings
 from llm_compass.common.schemas import Constraints
 from llm_compass.data.models import LLMMetadata, BenchmarkScore, BenchmarkDictionary
 from ..schemas import IntentExtraction, QueryExpansion
 from ..state import AgentState
-
-from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 import numpy as np
 
@@ -425,11 +425,12 @@ def retrieve_and_rank_models(
     }
 
 
-def execute_ranking(state: AgentState, *, session: Session) -> AgentState:
+def execute_ranking(state: AgentState, config: RunnableConfig) -> AgentState:
     """
     Wrapper for retrieve_and_rank_models tool.
-    Receives a database session via partial() injection (same pattern as Settings).
+    Receives a database session via LangGraph config (same pattern as benchmark_discovery_node).
     """
+    session: Session = config["configurable"]["session"]
     constraints_val = state.get("constraints")
     constraints: Dict[str, Any] = constraints_val.model_dump() if isinstance(constraints_val, Constraints) else (constraints_val or {})  # type: ignore[assignment]
 

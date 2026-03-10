@@ -1,5 +1,6 @@
 """Handle FAISS embeddings for BenchmarkDictionary model."""
 
+from functools import lru_cache
 from typing import Any
 
 import httpx
@@ -148,3 +149,9 @@ class Embedding:
         # Already sorted by FAISS (best first); keep explicit sort for safety
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
+
+
+@lru_cache(maxsize=None)
+def get_embedding(settings: Settings) -> Embedding:
+    """Return a cached Embedding instance per settings (FAISS index loaded once from disk)."""
+    return Embedding(settings)

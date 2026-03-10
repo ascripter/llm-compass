@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException
 from langchain_core.messages import HumanMessage
 
-from llm_compass.agentic_core.graph import build_graph
+from llm_compass.agentic_core.graph import get_graph
 from llm_compass.agentic_core.state import get_initial_state, AgentState
 from ..deps import get_db, require_api_key
 from ..schemas.common import ErrorDetail
@@ -165,13 +165,13 @@ async def create_query(
     db: object | None = Depends(get_db),
 ) -> QueryResponse:
     session_id = req.session_id or str(uuid.uuid4())
-    graph = build_graph(session=db)
+    graph = get_graph()
     initial_state = get_initial_state()
     initial_state["user_query"] = req.user_query
     initial_state["constraints"] = req.constraints  # .model_dump()
     initial_state["messages"] = [HumanMessage(req.user_query)]
 
-    config = {"configurable": {"thread_id": session_id}}
+    config = {"configurable": {"thread_id": session_id, "session": db}}
     result = graph.invoke(initial_state, config=config)
     state = result if isinstance(result, dict) else initial_state
 
@@ -198,8 +198,8 @@ async def clarify_query(
     msgs.append(HumanMessage(req.user_reply))
     prev_state["messages"] = msgs
 
-    graph = build_graph(session=db)
-    config = {"configurable": {"thread_id": session_id}}
+    graph = get_graph()
+    config = {"configurable": {"thread_id": session_id, "session": db}}
     result = graph.invoke(prev_state, config=config)
     state = result if isinstance(result, dict) else prev_state
 
