@@ -40,7 +40,7 @@ def _system_prompt(chat_history: list[AnyMessage]):
 """
 
 def token_ratio_estimation_node(state: AgentState, settings: Settings) -> dict[str, Any]:
-    llm = settings.make_llm("moonshotai/kimi-k2.5", temperature=0)
+    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0)
     token_estimator = llm.with_structured_output(TokenRatioEstimation)
 
     history = state.get("messages", [])
