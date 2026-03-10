@@ -35,10 +35,29 @@ def _init_session_state() -> None:
 
 def _run_query(user_query: str, sidebar_constraints: dict) -> None:
     constraints = transformers.sidebar_to_constraints(sidebar_constraints)
-    try:
-        raw = api_client.post_query(user_query, constraints)
-    except Exception as exc:
-        st.error(f"API error: {exc}")
+
+    with st.status("Analyzing your query...", expanded=True) as status_ui:
+        try:
+            raw = None
+            for event in api_client.post_query_stream(user_query, constraints):
+                etype = event.get("event")
+                if etype == "node_complete":
+                    msg = event.get("message", event.get("node", ""))
+                    status_ui.update(label=f"{msg}...")
+                    st.write(f"Done: {msg}")
+                elif etype == "complete":
+                    raw = event.get("data")
+                    status_ui.update(label="Complete!", state="complete")
+                elif etype == "error":
+                    status_ui.update(label="Error", state="error")
+                    st.error(event.get("message", "Unknown error"))
+                    return
+        except Exception as exc:
+            st.error(f"API error: {exc}")
+            return
+
+    if raw is None:
+        st.error("Stream ended without a response")
         return
 
     display = transformers.response_to_display(raw)

@@ -32,6 +32,15 @@ class TraceEvent(BaseModel):
     data: Dict[str, Any] = {}
 
 
+class StreamEvent(BaseModel):
+    """Single NDJSON line emitted by the streaming query endpoint."""
+
+    event: Literal["node_complete", "error", "complete"]
+    node: Optional[str] = None
+    message: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+
+
 class BenchmarkResult(BaseModel):
     benchmark_id: str
     benchmark_name: str
