@@ -57,6 +57,7 @@ def get_initial_state():
             "token_ratio_estimation": None,
             "search_queries": [],
             "weighted_benchmarks": [],
+            "average_benchmark_similarity": 0.0,
             "ranked_results": {},
             "final_response": None,
             "logs": [],
