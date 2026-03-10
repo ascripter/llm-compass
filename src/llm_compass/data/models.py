@@ -279,3 +279,90 @@ class BenchmarkScoreSchema(BaseModel):
             except ValueError:
                 continue
         raise ValueError(f"Unable to parse date: {v}")
+
+class ModelNormalized(Base):
+    """
+    Stores the structured output of normalizer.normalize() for every raw
+    model name seen during ingestion.
+
+    One row per *unique raw name* (raw is the natural key / unique constraint).
+    Re-running ingestion with update=True is idempotent — existing rows are
+    skipped; new raw names are inserted.
+
+    Columns map 1-to-1 to the dict returned by normalize():
+        raw · canonical_id · base_id · provider · family ·
+        version · size · variant · date · is_latest_alias
+    """
+
+    __tablename__ = "model_normalized"
+
+    id: Mapped[int] = col(Integer, autoincrement=True, primary_key=True)
+
+    # The original, unmodified string from the source sheet
+    raw: Mapped[str] = col(String, nullable=False, index=True)
+
+    # Full canonical ID including date suffix when present
+    # e.g.  "claude-3-7-sonnet-thinking-2025-02"
+    canonical_id: Mapped[str] = col(String, nullable=False, index=True)
+
+    # Canonical ID without trailing date  — use for cross-date deduplication
+    # e.g.  "claude-3-7-sonnet-thinking"
+    base_id: Mapped[str] = col(String, nullable=False, index=True)
+
+    # Detected provider slug  e.g. "anthropic" | "openai" | "deepseek"
+    provider: Mapped[str] = col(String, nullable=False)
+
+    # Model family slug  e.g. "claude-3-7-sonnet" | "o4-mini" | "gemini-2-5-pro"
+    family: Mapped[str] = col(String, nullable=False)
+
+    # Extracted version string or None  e.g. "3.7" | "2.5" | None
+    version: Mapped[Optional[str]] = col(String, nullable=True)
+
+    # Extracted parameter-count / size token or None  e.g. "70b" | "8x7b" | None
+    size: Mapped[Optional[str]] = col(String, nullable=True)
+
+    # Normalised variant label
+    # One of: standard | thinking | reasoning | instruct | preview | codex
+    variant: Mapped[str] = col(String, nullable=False, default="standard")
+
+    # ISO-8601 date string extracted from the raw name, or None
+    # e.g. "2025-02" | "2025-02-24" | None
+    date: Mapped[Optional[str]] = col(String, nullable=True)
+
+    # True when no 4-digit year token was found → this name likely means "latest"
+    is_latest_alias: Mapped[bool] = col(Boolean, nullable=False, default=False)
+
+    # When this row was written / last refreshed
+    ingested_at: Mapped[datetime] = col(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+
+
+
+class ModelNormalizedSchema(BaseModel):
+    """Pydantic schema for validating ModelNormalized entries before DB insert."""
+
+    raw: str
+    canonical_id: str
+    base_id: str
+    provider: str
+    family: str
+    version: Optional[str] = None
+    size: Optional[str] = None
+    variant: str = "standard"
+    date: Optional[str] = None
+    is_latest_alias: bool = False
+
+    @field_validator("raw", "canonical_id", "base_id", "provider", "family", "variant",
+                     mode="before")
+    @staticmethod
+    def strip_strings(v: Any) -> str:
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("version", "size", "date", mode="before")
+    @staticmethod
+    def empty_to_none(v: Any) -> Optional[str]:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v.strip()        

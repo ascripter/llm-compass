@@ -17,11 +17,13 @@ if __name__ == "__main__":
         ingest_benchmark_dictionary,
         ingest_llm_metadata,
         ingest_benchmark_scores,
+        ingest_model_normalized,
     )
     from llm_compass.data.read_source import (
         benchmark_dictionary_from_googlesheet,
         llm_metadata_from_local_json,
         benchmark_scores_from_googlesheet,
+        raw_model_names_from_googlesheet,
     )
 
     # No need to change directory manually with sys.path fix
@@ -42,4 +44,11 @@ if __name__ == "__main__":
     records_scores = benchmark_scores_from_googlesheet()
     ingest_benchmark_scores(
         records=records_scores, database=db, normalizer=norm, update=True, skip_fk=True
+    )
+
+    raw_names = raw_model_names_from_googlesheet()
+    ingest_model_normalized(
+    raw_model_names=raw_names,
+    database=db,
+    update=True,
     )

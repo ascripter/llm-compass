@@ -8,8 +8,8 @@ from typing import Any
 from sqlalchemy import insert, delete
 from .database import Database
 from .embedding import Embedding
-from .models import BenchmarkDictionary, LLMMetadata, BenchmarkScore
-from .normalizer import Normalizer
+from .models import BenchmarkDictionary, LLMMetadata, BenchmarkScore, ModelNormalized, ModelNormalizedSchema
+from .normalizer import Normalizer, normalize
 
 
 def ingest_benchmark_dictionary(
@@ -184,3 +184,70 @@ def ingest_benchmark_scores(
             session.execute(delete(BenchmarkScore))
             session.execute(insert(BenchmarkScore).values(records))
             session.commit()
+
+
+def ingest_model_normalized(
+    *,
+    raw_model_names: list[str],
+    database: Database,
+    update: bool = True,
+) -> list[dict]:
+    """
+    Normalize raw model name strings and persist results to the
+    `model_normalized` PostgreSQL table.
+
+    One DB row is written per entry in `raw_model_names` — including duplicates —
+    mirroring the source Google Sheet exactly.
+
+    Args:
+        raw_model_names:  Flat list of raw name strings, one per sheet row.
+                          Blank strings are skipped; duplicates are kept.
+        database:         Injected Database instance (provides SessionLocal).
+        update:           If True  → append rows to existing table.
+                          If False → wipe the table first, then bulk-insert.
+
+    Returns:
+        List of dicts (normalize() output) for all inserted rows.
+
+    Raises:
+        ValueError: If a normalized record fails Pydantic validation.
+
+    Usage example:
+        from .ingest import ingest_model_normalized
+
+        ingest_model_normalized(
+            raw_model_names=[r["model"] for r in rows],
+            database=db,
+            update=True,
+        )
+    """
+    # ── 1. Normalize — one record per sheet row, blanks skipped ──────────────
+    normalized: list[dict] = [
+        normalize(name.strip())
+        for name in raw_model_names
+        if name.strip()
+    ]
+
+    # ── 2. Validate with Pydantic (catches bad data early) ───────────────────
+    validated: list[dict] = []
+    for record in normalized:
+        try:
+            schema = ModelNormalizedSchema(**record)
+            validated.append(schema.model_dump())
+        except Exception as exc:
+            raise ValueError(
+                f"Validation failed for raw='{record.get('raw')}': {exc}"
+            ) from exc
+
+    # ── 3. Write to DB ────────────────────────────────────────────────────────
+    with database.SessionLocal() as session:
+        if not update:
+            # Dev / reset mode: wipe table first
+            session.execute(delete(ModelNormalized))
+            print("[model_normalized] Table wiped.")
+
+        session.execute(insert(ModelNormalized).values(validated))
+        session.commit()
+        print(f"[model_normalized] Inserted {len(validated)} rows.")
+
+    return validated

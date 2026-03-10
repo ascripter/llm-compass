@@ -148,3 +148,20 @@ def benchmark_scores_from_googlesheet() -> list[dict[str, Any]]:
     # - model_id (int, FK to LLMMetadata)
     # - benchmark_id (int, FK to BenchmarkDictionary)
     return rows
+
+
+def raw_model_names_from_googlesheet() -> list[str]:
+    """Read raw model name strings from the 'ingestion template' sheet tab
+    (gid=984276769), preserving one entry per row — including duplicates —
+    to mirror the source sheet exactly.
+
+    This is the input feed for model name normalization (normalize_v2.normalize).
+    It does NOT validate, rename, or deduplicate; that is handled downstream
+    by ingest_model_normalized().
+
+    Returns:
+        List of raw model name strings, one per non-blank sheet row.
+    """
+    url = _get_google_sheet_url(gid=984276769)
+    reader = _fetch_url_as_csv_reader(url)
+    return [row["model"] for row in reader if row.get("model", "").strip()]
