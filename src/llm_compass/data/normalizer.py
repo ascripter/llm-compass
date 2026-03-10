@@ -1,12 +1,11 @@
 """
 Model Name Normalizer  v2
 =========================
-Reads all rows from the ingestion template Google Sheet, normalizes every
-model name into a structured canonical record, and writes results to an
-Excel file (.xlsx).
+Normalizes raw model name strings into structured canonical records
+ready for PostgreSQL insertion via the ModelNormalized schema.
 
-Output fields per row:
-    provider · family · version · size · variant · date · canonical_id
+Output fields per record:
+    raw · canonical_id · base_id · provider · family · version · size · variant · date · is_latest_alias
 
 Design principles:
   1. Zero static model name lists — all rules are shape-based
@@ -22,36 +21,25 @@ Design principles:
  10. Collision-free: Thinking vs Nonthinking produce distinct canonical IDs
 
 Usage:
-    python normalizer.py                        # fetch live Google Sheet
-    python normalizer.py --csv local.csv        # skip network fetch
-    python normalizer.py --output results.xlsx
-    python normalizer.py --no-save              # print summary only
+    from .normalizer import normalize, Normalizer
+
+    # Single name
+    record = normalize("Claude 3.7 Sonnet (Thinking)")
+
+    # Batch — via Normalizer class (used by ingest pipeline)
+    normalizer = Normalizer(settings)
+    names = normalizer.normalize_model_names(raw_names)
 """
 
-import argparse
-import csv
-import io
 import re
-import sys
-import urllib.request
-from collections import defaultdict
-from typing import Optional
-
-from openpyxl import Workbook
-
-import pandas as pd
-import re
-import urllib.request
-from io import StringIO
-from collections import Counter
-
-
 from collections.abc import Sequence
 from typing import Optional
+
 from llm_compass.config import Settings
 
 
-# ── 0. INTERFACE (Andreas) ─────────────────────────────────────────────────────────
+# ── 0. INTERFACE ───────────────────────────────────────────────────────────────
+
 class Normalizer:
     """
     Centralizes normalization logic for model and benchmark names.
@@ -60,36 +48,25 @@ class Normalizer:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        # Initialize LLM client here (e.g. Openrouter) with a small model for normalization tasks.
 
     def normalize_model_names(self, raw_names: list[str]) -> list[str]:
         """
         Uses an LLM call to standardize names.
         e.g., "llama-2-7b-chat-hf" -> "Llama 2 7B Chat"
         """
-        # implementation using Openrouter client with a small model (e.g. gpt-3.5-turbo) to do the normalization.
         return [n.strip() for n in raw_names]  # Placeholder
 
     def normalize_benchmark_names(
         self, raw_names: list[str], raw_variants: Sequence[str | None] | None = None
     ) -> list[tuple[str, Optional[str]]]:
         """
-        Uses an LLM call to standardize names and split into base name + benchmark variant if applicable.
+        Uses an LLM call to standardize names and split into base name + variant.
         e.g., "mmlu-5shot" -> ("MMLU", "5 Shot")
         """
-        # implementation using Openrouter client with a small model (e.g. gpt-3.5-turbo) to do the normalization.
         if raw_variants is None:
             raw_variants = [None] * len(raw_names)
         assert len(raw_names) == len(raw_variants), "raw_names and raw_variants must be same len"
-        # Placeholder: no modification for MVP
-        return [(n.strip(), v) for n, v in zip(raw_names, raw_variants)]
-
-
-### Code section Nidhi ###
-# ── Configuration ──────────────────────────────────────────────────────────────
-SHEET_ID       = "1a_4LmfIuKhhHzzZ3-xcO6jStHCIxbhgF60rRxoPfiMU"
-GID            = "984276769"
-DEFAULT_OUTPUT = "normalized_model_names.xlsx"
+        return [(n.strip(), v) for n, v in zip(raw_names, raw_variants)]  # Placeholder
 
 
 # =============================================================================
@@ -110,14 +87,13 @@ def _is_date_token(tok: str) -> bool:
     return any(p.match(tok) for p in _DATE_SHAPES)
 
 
-# Covers: 70b  1.5b  235b  8x7b  480b/a35b  235b-a22b  270m  180k
 _SIZE_SHAPE_RE = re.compile(
     r'^(?:\d+x)?\d+(?:\.\d+)?[bmk]'
-    r'(?:[x/\-]a?\d+(?:\.\d+)?[bmk]'   # delimited:  30b-a3b  235b-a22b
-    r'|a\d+(?:\.\d+)?[bmk]'              # fused:      30ba3b   235ba22b
+    r'(?:[x/\-]a?\d+(?:\.\d+)?[bmk]'
+    r'|a\d+(?:\.\d+)?[bmk]'
     r')?$', re.I
 )
-_MOE_FRAG_RE  = re.compile(r'^a\d+(?:\.\d+)?[bmk]$', re.I)   # a22b  a3b
+_MOE_FRAG_RE  = re.compile(r'^a\d+(?:\.\d+)?[bmk]$', re.I)
 _TIER_SIZE_RE = re.compile(r'^(mini|nano|small|lite|tiny)$', re.I)
 
 
@@ -148,28 +124,18 @@ def _version_value(tok: str) -> Optional[str]:
 # PART 2 — TOKENIZATION
 # =============================================================================
 
-# Smart CamelCase splitting — four passes (from reference code):
-#   1. Acronym-end:  GPTSonnet → GPT Sonnet
-#   2. CamelCase:    proPreview → pro Preview
-#   3. Digit→Upper:  4Sonnet   → 4 Sonnet
-#   4. Word-start lower→digit: flash2 → flash 2
-#      (lookbehind preserves Qwen3/GLM4 mid-word)
 _CAMEL_PASSES = [
     (re.compile(r'([A-Z]{2,})([A-Z][a-z])'),      r'\1 \2'),
     (re.compile(r'([a-z])([A-Z])'),                r'\1 \2'),
     (re.compile(r'(\d)([A-Z][a-z])'),              r'\1 \2'),
     (re.compile(r'(?:(?<=\s)|^)([a-np-z])(\d)'),   r'\1 \2'),
-    # Split letter→decimal: Opus4.6 → Opus 4.6  (decimal only, not plain suffix digits)
-    (re.compile(r'([a-zA-Z])(\d+\.\d+)'),         r'\1 \2'),
+    (re.compile(r'([a-zA-Z])(\d+\.\d+)'),          r'\1 \2'),
     (re.compile(r'\s{2,}'),                         ' '),
 ]
 
-# Parens whose entire content is a date/build-ID are fully suppressed
 _DATE_PAREN_RE = re.compile(
     r'^\s*(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{2,4}|\d{4}-\d{2}|\d{2,8})\s*$'
 )
-
-# Sampling annotations stripped before tokenisation
 _SAMPLING_RE = re.compile(r'\(T\s*=\s*[\d.]+\)|\bT\s*=\s*[\d.]+\b', re.I)
 
 
@@ -180,17 +146,6 @@ def _split_camel(s: str) -> str:
 
 
 def _tokenize(raw: str) -> list[str]:
-    """
-    Lowercase token list from a raw model name.
-
-    - Strips sampling annotations (T=1) first
-    - Fully suppresses date parens: (9/25) (2512) (20250514)
-    - Extracts semantic parens: (Thinking) (high reasoning) → appended tokens
-    - CamelCase-splits each delimiter-separated piece, then re-joins its
-      sub-tokens as one compound to preserve brand names:
-        DeepSeek → 'deepseek'   Qwen3 → 'qwen3'   BrandNew → 'brandnew'
-      Real-delimiter pieces (spaces) produce separate tokens as normal.
-    """
     s = _SAMPLING_RE.sub(' ', raw.strip().strip('"'))
 
     variant_texts: list[str] = []
@@ -205,10 +160,6 @@ def _tokenize(raw: str) -> list[str]:
         if not raw_tok:
             continue
         sub = [t for t in re.split(r'\s+', _split_camel(raw_tok)) if t]
-        # Rejoin sub-tokens as one compound UNLESS a boundary is present:
-        #   version ↔ text:  ["3.7","Sonnet"] or ["opus","4.6"] — keep separate
-        #   camel pure-text: ["Magistral","Medium"] — keep separate
-        #     (known brand compounds are re-merged downstream by _merge_tokens)
         _is_ver = lambda t: bool(re.match(r'^\d+(?:\.\d+)*$', t))
         _is_txt = lambda t: bool(re.match(r'^[a-zA-Z]+$', t))
         has_version_boundary = any(
@@ -226,8 +177,6 @@ def _tokenize(raw: str) -> list[str]:
         else:
             result.append(''.join(sub).lower())
 
-    # Split series-id+word fusions that arrive with no camel boundary:
-    # k2thinking → k2, thinking    r1distill → r1, distill
     _SERIES_FUSE_RE = re.compile(r'^([rk]\d+)([a-z].+)$')
     split_result = []
     for tok in result:
@@ -247,7 +196,7 @@ def _tokenize(raw: str) -> list[str]:
 
 
 # =============================================================================
-# PART 3 — DATE EXTRACTION  (on raw string, before tokenization)
+# PART 3 — DATE EXTRACTION
 # =============================================================================
 
 _DATE_PATTERNS = [
@@ -284,16 +233,6 @@ def _extract_date(raw: str) -> Optional[str]:
 # =============================================================================
 # PART 4 — VARIANT EXTRACTION
 # =============================================================================
-#
-# Priority order:
-#   nonthinking > thinking > codex > fast+reasoning(compound) > instruct >
-#   preview > reasoner > reasoning
-#
-# Inference-config rule:
-#   noise-qualifier (high/medium/low/default) + "reasoning" → consumed, no variant
-#
-# Compound rule:
-#   "fast" + "reasoning" together → variant=reasoning (both consumed)
 
 _VARIANT_TRIGGERS = [
     (re.compile(r'^non[-_]?thinking$', re.I), 'standard'),
@@ -319,11 +258,9 @@ def _extract_variant(tokens: list[str]) -> tuple[str, list[str]]:
     reasoning_idx = {i for i, t in enumerate(tokens) if re.match(r'^reasoning$', t, re.I)}
     fast_idx      = {i for i, t in enumerate(tokens) if re.match(r'^fast$', t, re.I)}
 
-    # Inference-config: noise-qualifier + reasoning → suppress both, no variant
     if noise_idx and reasoning_idx:
         consumed |= noise_idx | reasoning_idx
 
-    # Compound: fast + reasoning → reasoning (when reasoning not already suppressed)
     variant = 'standard'
     remaining_reasoning = reasoning_idx - consumed
     if fast_idx and remaining_reasoning:
@@ -340,8 +277,6 @@ def _extract_variant(tokens: list[str]) -> tuple[str, list[str]]:
             if variant != 'standard':
                 break
 
-    # Only consume noise tokens when they were part of an inference-config pair.
-    # A standalone 'medium' (e.g. "Magistral Medium") is a legitimate tier word.
     if noise_idx and reasoning_idx:
         consumed |= noise_idx
     return variant, [t for i, t in enumerate(tokens) if i not in consumed]
@@ -351,9 +286,6 @@ def _extract_variant(tokens: list[str]) -> tuple[str, list[str]]:
 # PART 5 — SIZE EXTRACTION
 # =============================================================================
 
-# Tier label (mini/nano/small/lite) is a subfamily qualifier when immediately
-# preceded by one of these words — it belongs in the family, not size field.
-# e.g. "Flash Lite" → lite stays in family; "Devstral small" → size=small
 _SUBFAMILY_WORDS = frozenset({'flash', 'pro', 'ultra', 'max', 'plus', 'base', 'next', 'turbo'})
 
 
@@ -372,12 +304,10 @@ def _extract_size(tokens: list[str]) -> tuple[Optional[str], list[str]]:
             continue
         if _TIER_SIZE_RE.match(tok) and tier_is_subfamily:
             continue
-        # Normalise fused MoE token: 30ba3b → 30b-a3b
         _FUSED_MOE_RE = re.compile(r'^(\d+(?:\.\d+)?[bmk])(a\d+(?:\.\d+)?[bmk])$', re.I)
         fused = _FUSED_MOE_RE.match(tok)
         if fused:
             return f"{fused.group(1)}-{fused.group(2)}", tokens[:i] + tokens[i+1:]
-        # Merge adjacent MoE fragment: 235b + a22b → 235b-a22b
         if (i + 1 < len(tokens)
                 and _MOE_FRAG_RE.match(tokens[i + 1])
                 and not _TIER_SIZE_RE.match(tok)):
@@ -390,7 +320,7 @@ def _extract_size(tokens: list[str]) -> tuple[Optional[str], list[str]]:
 # PART 6 — VERSION EXTRACTION
 # =============================================================================
 
-_VERSION_FAMILY_RE = re.compile(r'^[rk]\d+(?:\.\d+)?$', re.I)  # r1 r2 k2 k2.5
+_VERSION_FAMILY_RE = re.compile(r'^[rk]\d+(?:\.\d+)?$', re.I)
 
 
 def _extract_version(tokens: list[str]) -> tuple[Optional[str], list[str]]:
@@ -404,22 +334,17 @@ def _extract_version(tokens: list[str]) -> tuple[Optional[str], list[str]]:
 
 
 # =============================================================================
-# PART 7 — PROVIDER DETECTION  (PROVIDER_PATTERNS + slug fallback)
+# PART 7 — PROVIDER DETECTION
 # =============================================================================
-#
-# Patterns match against individual tokens from the tokenized model name.
-# Each pattern is a structural brand-slug regex, not a model name list.
-# Order matters: most-specific patterns first (gpt-oss before gpt).
-# Unknown brands get a slug of the first word automatically.
 
 PROVIDER_PATTERNS = [
     (re.compile(r'^claude$|^anthropic$',            re.I), 'anthropic'),
-    (re.compile(r'^gptoss$',                        re.I), 'openai'),   # gpt-oss compound
+    (re.compile(r'^gptoss$',                        re.I), 'openai'),
     (re.compile(r'^gpt$|^openai$',                  re.I), 'openai'),
     (re.compile(r'^gemini$|^google$|^gemma$',        re.I), 'google'),
     (re.compile(r'^llama$|^meta$',                  re.I), 'meta'),
     (re.compile(r'^mistral$|^mixtral$|^devstral$',   re.I), 'mistral'),
-    (re.compile(r'^qwen\d*$|^qwq$',                re.I), 'alibaba'),  # qwen qwen3 qwen2.5
+    (re.compile(r'^qwen\d*$|^qwq$',                re.I), 'alibaba'),
     (re.compile(r'^deepseek$',                      re.I), 'deepseek'),
     (re.compile(r'^grok$|^xai$',                    re.I), 'xai'),
     (re.compile(r'^phi$|^microsoft$',               re.I), 'microsoft'),
@@ -445,7 +370,6 @@ def _detect_provider(tokens: list[str], raw: str) -> str:
         for tok in tokens:
             if pat.match(tok):
                 return provider
-    # Slug fallback: first word of raw name
     first = re.split(r'[\s\-_]', raw.strip())[0]
     return re.sub(r'[^a-z0-9]', '', first.lower()) or 'unknown'
 
@@ -496,21 +420,15 @@ def _build_family(tokens: list[str], provider: str) -> str:
 # =============================================================================
 # PART 9b — TOKEN MERGE MAP
 # =============================================================================
-# Brand names that are sometimes written with a delimiter (space or dash) between
-# their parts are listed here as consecutive token sequences → single merged token.
-# This is NOT a model list — it's a brand-slug alias list. New entries can be
-# added without touching any other part of the pipeline.
 
 _TOKEN_MERGES: list[tuple[tuple[str, ...], str]] = [
     (('deep', 'seek'), 'deepseek'),
     (('chat', 'gpt'),  'chatgpt'),
-    # Company-name aliases → canonical product family token
     (('alibaba',),     'qwen'),
 ]
 
 
 def _merge_tokens(tokens: list[str]) -> list[str]:
-    """Replace consecutive token sequences with their merged form."""
     for seq, merged in _TOKEN_MERGES:
         n = len(seq)
         i = 0
@@ -524,8 +442,6 @@ def _merge_tokens(tokens: list[str]) -> list[str]:
                 i += 1
         tokens = out
 
-    # Versioned brand merges: qwen + plain-integer → qwen{N}
-    # e.g. ['qwen', '2', 'vl'] → ['qwen2', 'vl']  (matches Qwen2-VL tokenization)
     _VERSIONED_BRANDS = frozenset({'qwen'})
     i = 0
     out = []
@@ -547,21 +463,31 @@ def _merge_tokens(tokens: list[str]) -> list[str]:
 
 def normalize(raw: str) -> dict:
     """
-    Normalize a single raw model name into a structured canonical record.
+    Normalize a single raw model name into a structured record matching
+    the ModelNormalized DB schema.
 
-    Pipeline:
-        raw string
-          ├─ o-series detection      (needs original form)
-          ├─ date extraction         (needs original form)
-          ├─ tokenize                (paren-aware, CamelCase-split, lowercase)
-          │    token list
-          │      ├─ drop date-shaped + explicit noise tokens
-          │      ├─ variant extraction   (priority-ordered; inference config suppressed)
-          │      ├─ size extraction      (shape-based; MoE merge; tier-subfamily rule)
-          │      ├─ version extraction   (shape-based; r/k family tokens skipped)
-          │      ├─ provider detection   (PROVIDER_PATTERNS → slug fallback)
-          │      └─ family construction  (remaining tokens; unknowns kept)
-          └─ canonical ID:  family[-version][-size]-variant[-date]
+    Args:
+        raw: A single raw model name string.
+
+    Returns:
+        Dict with keys:
+            raw, canonical_id, base_id, provider, family,
+            version, size, variant, date, is_latest_alias
+
+    Example:
+        >>> normalize("Claude 3.7 Sonnet (Thinking)")
+        {
+            'raw': 'Claude 3.7 Sonnet (Thinking)',
+            'canonical_id': 'claude-sonnet-3.7-thinking',
+            'base_id': 'claude-sonnet-3.7-thinking',
+            'provider': 'anthropic',
+            'family': 'claude-sonnet',
+            'version': '3.7',
+            'size': None,
+            'variant': 'thinking',
+            'date': None,
+            'is_latest_alias': True,
+        }
     """
     is_o, o_fields = _detect_o_series(raw)
     date           = _extract_date(raw)
@@ -589,7 +515,6 @@ def normalize(raw: str) -> dict:
         if variant == 'standard':
             variant = o_fields['variant']
 
-    # DeepSeek R1 architecture always → reasoning
     if re.search(r'\bdeep[- ]?seek[- ]?r1\b', raw, re.IGNORECASE) and variant == 'standard':
         variant = 'reasoning'
 
@@ -618,142 +543,3 @@ def normalize(raw: str) -> dict:
         'date':            date,
         'is_latest_alias': is_latest,
     }
-
-
-# =============================================================================
-# PART 11 — DATA LOADING
-# =============================================================================
-
-def _fetch_sheet_csv(sheet_id: str, gid: str) -> list[dict]:
-    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-           f"/export?format=csv&gid={gid}")
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return list(csv.DictReader(io.StringIO(resp.read().decode("utf-8"))))
-
-
-def _load_csv_file(path: str) -> list[dict]:
-    with open(path, encoding='utf-8') as f:
-        return list(csv.DictReader(f))
-
-
-def _filter_rows(rows: list[dict]) -> list[dict]:
-    """Keep all rows — blank model rows included (written as empty in xlsx)."""
-    return rows
-
-
-# =============================================================================
-# PART 12 — XLSX OUTPUT
-# =============================================================================
-
-def build_xlsx(rows: list[dict], norm_map: dict, output_path: str) -> None:
-    """
-    Single sheet, no styling.
-    Columns: model | canonical_id | provider | family | version | size | variant | date
-    One output row per input row, in original sheet order.
-    Blank model rows get empty normalization fields.
-    """
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Model Normalization"
-    ws.freeze_panes = "A2"
-
-    ws.append(["model", "canonical_id", "base_id", "provider", "family", "version", "size", "variant", "date"])
-
-    for row in rows:
-        model = row.get('model', '').strip()
-        if model:
-            n = norm_map.get(model, normalize(model))
-            ws.append([
-                model,
-                n['canonical_id'],
-                n['base_id'],
-                n['provider'],
-                n['family'],
-                n['version'] or '',
-                n['size'] or '',
-                n['variant'],
-                n['date'] or '',
-            ])
-        else:
-            ws.append(['', '', '', '', '', '', '', '', ''])
-
-    wb.save(output_path)
-    print(f"✅  Saved → {output_path}  ({len(rows)} rows)")
-
-
-# =============================================================================
-# PART 13 — CONSOLE SUMMARY
-# =============================================================================
-
-def _print_summary(rows: list[dict], norm_map: dict) -> None:
-    by_provider: dict[str, int] = defaultdict(int)
-    by_variant:  dict[str, int] = defaultdict(int)
-    for n in norm_map.values():
-        by_provider[n['provider']] += 1
-        by_variant[n['variant']]   += 1
-
-    unique_cids = len({n['canonical_id'] for n in norm_map.values()})
-    print()
-    print("=" * 52)
-    print("  NORMALIZATION SUMMARY")
-    print("=" * 52)
-    print(f"  Total sheet rows      : {len(rows)}")
-    print(f"  Unique raw names      : {len(norm_map)}")
-    print(f"  Unique canonical IDs  : {unique_cids}")
-    print()
-    print("  By provider:")
-    for p, c in sorted(by_provider.items(), key=lambda x: -x[1]):
-        print(f"    {p:<22} {c:>4}")
-    print()
-    print("  By variant:")
-    for v, c in sorted(by_variant.items(), key=lambda x: -x[1]):
-        print(f"    {v:<22} {c:>4}")
-    print("=" * 52)
-
-
-# =============================================================================
-# PART 14 — MAIN
-# =============================================================================
-
-def main():
-    parser = argparse.ArgumentParser(
-        description='Normalize AI model names and write to Excel'
-    )
-    parser.add_argument('--sheet',   default=SHEET_ID,       help='Google Sheet ID')
-    parser.add_argument('--gid',     default=GID,            help='Sheet tab GID')
-    parser.add_argument('--csv',     default=None,           help='Local CSV (skips fetch)')
-    parser.add_argument('--output',  default=DEFAULT_OUTPUT, help='Output .xlsx path')
-    parser.add_argument('--no-save', action='store_true',    help='Print summary only')
-    args = parser.parse_args()
-
-    if args.csv:
-        print(f"📂  Loading local CSV: {args.csv}")
-        rows = _load_csv_file(args.csv)
-    else:
-        print(f"📥  Fetching Google Sheet  (id={args.sheet}  gid={args.gid})...")
-        try:
-            rows = _fetch_sheet_csv(args.sheet, args.gid)
-            print(f"    ✓ Fetched {len(rows)} rows")
-        except Exception as e:
-            print(f"\n❌  Failed to fetch sheet: {e}")
-            print("    Make sure the sheet is publicly shared (Anyone with link → Viewer).")
-            print("    Or pass a local export with --csv path/to/export.csv")
-            sys.exit(1)
-
-    rows = _filter_rows(rows)
-    print(f"    ✓ {len(rows)} total rows loaded")
-
-    unique = list({r['model'].strip() for r in rows if r.get('model', '').strip()})
-    print(f"\n🔄  Normalizing {len(unique)} unique model names...")
-    norm_map = {name: normalize(name) for name in unique}
-
-    _print_summary(rows, norm_map)
-
-    if not args.no_save:
-        print(f"\n📊  Building Excel workbook ({len(rows)} rows)...")
-        build_xlsx(rows, norm_map, args.output)
-
-
-if __name__ == '__main__':
-    main()
