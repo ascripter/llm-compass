@@ -36,10 +36,6 @@ def find_relevant_benchmarks(
     """
     embedding = Embedding(settings)
 
-    # Get all benchmark records
-    from llm_compass.data.database import Database
-
-    db = Database(settings)
     with session:
         records = session.query(BenchmarkDictionary).all()
         records_dict = {record.id: record for record in records}
