@@ -118,7 +118,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         _ for _ in response.intended_input_modalities if _ not in constraints.modality_input
     ]
     ui_missing_output = [
-        _ for _ in response.intended_output_modalities if _ not in constraints.modality_input
+        _ for _ in response.intended_output_modalities if _ not in constraints.modality_output
     ]
     ui_overspec_input = [
         _ for _ in constraints.modality_input if _ not in response.intended_input_modalities
@@ -127,7 +127,10 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         _ for _ in constraints.modality_output if _ not in response.intended_output_modalities
     ]
     ui_mismatch = ui_missing_input or ui_missing_output or ui_overspec_input or ui_overspec_output
-
+    logger.debug(
+        f"ui_missing_input={ui_missing_input} | ui_missing_output={ui_missing_output} | "
+        f"ui_overspec_input={ui_overspec_input} | ui_overspec_output={ui_overspec_output}"
+    )
     # Only trigger clarification for mismatch if user hasn't been hinted yet
     effective_ui_mismatch = ui_mismatch and not ui_mismatch_hinted
 
