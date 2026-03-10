@@ -111,7 +111,15 @@ class Embedding:
         """
         if self.index is None:
             raise ValueError("FAISS index not found. Please generate the index before searching.")
-        q = self._openrouter_embed([query])
+
+        # modify query to trigger Qwen's asymmetric search capabilities
+        instruct = (
+            "Given a short task description, find the most relevant LLM benchmark descriptions "
+            "that evaluates this capability."
+        )
+        query_instruct = f"Instruct: {instruct}\nQuery: {query}"
+
+        q = self._openrouter_embed([query_instruct])
         faiss.normalize_L2(q)  # same normalization as index vectors
 
         scores, ids = self.index.search(q, top_k)  # type: ignore
