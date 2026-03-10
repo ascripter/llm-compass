@@ -37,9 +37,8 @@ def find_relevant_benchmarks(
     """
     embedding = get_embedding(settings)
 
-    with session:
-        records = session.query(BenchmarkDictionary).all()
-        records_dict = {record.id: record for record in records}
+    records = session.query(BenchmarkDictionary).all()
+    records_dict = {record.id: record for record in records}
 
     if not records_dict:
         logger.warning("No benchmark records found in database")
@@ -65,7 +64,6 @@ def find_relevant_benchmarks(
         bench_id = result["id"]
         score = result["score"]
         item = result["item"]
-        logger.debug(f"id {bench_id}: {item.name_normalized}, score={score:.4f}")
         if bench_id not in benchmark_scores:
             # since item is an sqlalchemy model, we dynamically convert columns to dict
             benchmark_scores[bench_id] = {
