@@ -52,7 +52,8 @@ You MUST NOT ask about or mention ANY of the following topics. This is non-negot
 - Cost or pricing sensitivity.
 - Model speed or latency requirements.
 - General accuracy or benchmark performance.
-- Specific model names or providers."""
+- Specific model names or providers.
+- Specific output format."""
 
 
 def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any]:
