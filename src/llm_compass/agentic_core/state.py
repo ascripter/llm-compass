@@ -31,6 +31,7 @@ class AgentState(MessagesState):
 
     # From Benchmark Discovery (Req 2.3 Node 3)
     weighted_benchmarks: List[Dict[str, Any]]
+    average_benchmark_similarity: float  # how well do the benchmarks fit in general
 
     # From Scoring and Ranking (Req 2.3 Node 4)
     ranked_results: Dict[str, List[Any]]  # "top", "balanced", "budget" lists
