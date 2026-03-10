@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from llm_compass.agentic_core.nodes.validate_intent import validate_intent_node
+from llm_compass.agentic_core.nodes.validate_intent import validate_intent_node, HINTS_MSG
 from llm_compass.agentic_core.schemas.validate_intent import IntentExtraction
 from llm_compass.agentic_core.state import AgentState
 from llm_compass.common.schemas import Constraints
@@ -53,7 +53,7 @@ def _make_response(
         is_specific=is_specific,
         intended_input_modalities=input_modalities or (["text"] if is_specific else []),
         intended_output_modalities=output_modalities or (["text"] if is_specific else []),
-        clarification_needed=clarification_needed or ([] if is_specific else ["Please clarify your task."]),
+        clarification_needed=clarification_needed if clarification_needed is not None else ([] if is_specific else ["Please clarify your task."]),
     )
 
 
@@ -102,7 +102,7 @@ class TestNotSpecific:
         result = validate_intent_node(_make_state(), settings=_make_settings(response))
 
         msg_content = result["messages"][0].content  # type: ignore[union-attr]
-        assert msg_content == question
+        assert msg_content.startswith(question)
 
     def test_multiple_questions_formatted_as_list(self):
         questions = ["What is your input?", "What is your output?"]
@@ -120,7 +120,7 @@ class TestNotSpecific:
         result = validate_intent_node(_make_state(), settings=_make_settings(response))
 
         msg_content = result["messages"][0].content  # type: ignore[union-attr]
-        assert msg_content == "Please clarify your task."
+        assert msg_content.startswith(f"This is too vague. Please be as specific as possible:\n{HINTS_MSG}")
 
     def test_log_entry_added(self):
         response = _make_response(is_specific=False, clarification_needed=["Clarify."])

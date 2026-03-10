@@ -29,8 +29,13 @@ from ..schemas import IntentExtraction
 
 logger = logging.getLogger(__name__)
 
+HINTS_MSG = f"""- describe your task clearly
+- input and output modalities should be clear for your task {MODALITY_VALUES}
+- make sure the modalities selected in the UI are consistent with your task
+- if possible, estimate the amount of tokens for input / output *per modality* that will occur with an average LLM invocation"""
+
 # System prompt for the LLM-based validator
-INTENT_VALIDATOR_SYSTEM_PROMPT = """You are an intent validation assistant in an AI routing pipeline.
+INTENT_VALIDATOR_SYSTEM_PROMPT = f"""You are an intent validation assistant in an AI routing pipeline.
 
 ## Your Task
 Analyze the user's request (and any conversation history) to:
@@ -43,8 +48,8 @@ Follow the rules and examples defined in your output schema.
 ## Clarification Scope
 When the request is unclear, ask ONLY about:
 - The actual use case or task description.
-- Input modalities (text, image, audio, video).
-- Output modalities (text, image, audio, video).
+- Input modalities {MODALITY_VALUES}.
+- Output modalities {MODALITY_VALUES}.
 
 ## Strict Rules
 You MUST NOT ask about or mention ANY of the following topics. This is non-negotiable:
@@ -77,14 +82,6 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
             - intent_extraction: IntentExtraction
             - logs: List[str] (appended)
     """
-    hints_msg = (
-        "- describe your task clearly\n"
-        f"- input and output modalities should be clear for your task {MODALITY_VALUES}\n"
-        "- make sure the modalities selected in the UI are consistent with your task\n"
-        "- if possible, estimate the amount of tokens for input / output *per modality* "
-        "that will occur with an average LLM invocation"
-    )
-
     logger.debug(
         "validate_intent_node ENTRY | user_query=%r | clarification_count=%d | constraints=%s | messages=%s",
         state.get("user_query"),
@@ -133,28 +130,28 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         f"ui_overspec_input={ui_overspec_input} | ui_overspec_output={ui_overspec_output}"
     )
     # Only trigger clarification for mismatch if user hasn't been hinted yet
-    effective_ui_mismatch = ui_mismatch and not ui_mismatch_hinted
+    first_ui_mismatch = ui_mismatch and not ui_mismatch_hinted
 
-    if (not response.is_specific or effective_ui_mismatch) and clarification_count >= 3:
+    if not response.is_specific and clarification_count >= 3:
         # trials exceeded
         msg = (
             "I've asked for clarification multiple times, but I'm still unable to understand "
             "your request properly. Please start over and be as specific as possible:\n"
-            f"{hints_msg}"
+            f"{HINTS_MSG}"
         )
         logs.append(
             (f"Intent Validator: Clarification limit exceeded (count={clarification_count}).")
         )
         state_update["clarification_limit_exceeded"] = True
         state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
-    elif not response.is_specific or effective_ui_mismatch:
+    elif not response.is_specific or first_ui_mismatch:
         state_update["clarification_count"] = clarification_count + 1
         msg = ""
         if not response.is_specific:
             # Format the list of clarification questions into a single cohesive message
             if len(response.clarification_needed) == 0:
                 # Shouldn't happen since LLM was instructed to provide 1 entry, but *can* happen
-                msg += f"This is too vague. Please be as specific as possible:\n{hints_msg}"
+                msg += f"This is too vague. Please be as specific as possible:\n{HINTS_MSG}"
             elif len(response.clarification_needed) == 1:
                 msg += response.clarification_needed[0]
             else:
@@ -164,7 +161,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
             logs.append(f"Intent Validator: Response not specific:\n'''{msg}'''")
             msg += "\n\n"
 
-        if effective_ui_mismatch:
+        if first_ui_mismatch:
             # Add info about modality mismatch
             msg += "Your task indicates the following modalities:\n"
             msg += f"- input: {response.intended_input_modalities}\n"
@@ -179,6 +176,23 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
                 )
             )
             state_update["ui_mismatch_hinted"] = True
+            response.is_specific = False  # patch it to trigger iteration of node
+        else:
+            # consecutive ui mismatch -> only soft hint
+            msg += "I've mentioned that already, but want to make sure your modality filter "
+            msg += "is set correctly.\nYour task description currently indicates the following "
+            msg += "modalities:\n"
+            msg += f"- input: {response.intended_input_modalities}\n"
+            msg += f"- output: {response.intended_output_modalities}\n\n"
+            msg += "This currently conflicts with your selection in the UI. Eventually the "
+            msg += "UI filters will take precedence and determine the recommendations you get."
+            logs.append(
+                (
+                    "Intent Validator: Consecutive modality-mismatch.\nMissing UI input: "
+                    f"{ui_missing_input}; and output: {ui_missing_output}.\n"
+                    "Overspec UI input: {ui_overspec_input}; and output: {ui_overspec_output}"
+                )
+            )
 
         # Append this AIMessage to the conversation history
         state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
