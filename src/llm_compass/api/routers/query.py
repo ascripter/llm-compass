@@ -1,14 +1,26 @@
+import json
+import logging
 import uuid
-from typing import Any, Dict, List
+from typing import Any, AsyncIterator, List
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
-from llm_compass.agentic_core.graph import build_graph
+from llm_compass.agentic_core.graph import get_graph
 from llm_compass.agentic_core.state import get_initial_state, AgentState
 from ..deps import get_db, require_api_key
 from ..schemas.common import ErrorDetail
-from ..schemas.query import ClarifyRequest, QueryRequest, QueryResponse, TraceEvent, UIComponents
+from ..schemas.query import (
+    ClarifyRequest,
+    QueryRequest,
+    QueryResponse,
+    StreamEvent,
+    TraceEvent,
+    UIComponents,
+)
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/v1", tags=["Query"])
@@ -165,13 +177,13 @@ async def create_query(
     db: object | None = Depends(get_db),
 ) -> QueryResponse:
     session_id = req.session_id or str(uuid.uuid4())
-    graph = build_graph(session=db)
+    graph = get_graph()
     initial_state = get_initial_state()
     initial_state["user_query"] = req.user_query
     initial_state["constraints"] = req.constraints  # .model_dump()
     initial_state["messages"] = [HumanMessage(req.user_query)]
 
-    config = {"configurable": {"thread_id": session_id}}
+    config = {"configurable": {"thread_id": session_id, "session": db}}
     result = graph.invoke(initial_state, config=config)
     state = result if isinstance(result, dict) else initial_state
 
@@ -198,10 +210,84 @@ async def clarify_query(
     msgs.append(HumanMessage(req.user_reply))
     prev_state["messages"] = msgs
 
-    graph = build_graph(session=db)
-    config = {"configurable": {"thread_id": session_id}}
+    graph = get_graph()
+    config = {"configurable": {"thread_id": session_id, "session": db}}
     result = graph.invoke(prev_state, config=config)
     state = result if isinstance(result, dict) else prev_state
 
     _sessions[session_id] = state
     return _build_response(session_id, state)
+
+
+# ---------------------------------------------------------------------------
+# Streaming endpoint (NDJSON)
+# ---------------------------------------------------------------------------
+
+# Mapping node names from agentic_core/graph.py to messages
+_NODE_LABELS = {
+    "validator": "Analyzing intent",
+    "token_ratio": "Estimating token ratios",
+    "refiner": "Generating search queries",
+    "benchmark_discovery": "Discovering benchmarks",
+    "ranking": "Ranking models",
+}
+
+# Keys whose reducer is *append* rather than *overwrite*
+_APPEND_KEYS = {"logs", "messages"}
+
+
+async def _stream_graph(session_id: str, initial_state: dict, config: dict) -> AsyncIterator[str]:
+    """Yield NDJSON lines: one per completed node, then a final ``complete`` event."""
+    graph = get_graph()
+    accumulated = dict(initial_state)
+
+    try:
+        async for chunk in graph.astream(initial_state, config=config, stream_mode="updates"):
+            for node_name, update in chunk.items():
+                # Merge update into accumulated state
+                for key, value in update.items():
+                    if key in _APPEND_KEYS:
+                        existing = accumulated.get(key, [])
+                        accumulated[key] = existing + (
+                            value if isinstance(value, list) else [value]
+                        )
+                    else:
+                        accumulated[key] = value
+
+                event = StreamEvent(
+                    event="node_complete",
+                    node=node_name,
+                    message=_NODE_LABELS.get(node_name, node_name),
+                )
+                yield json.dumps(event.model_dump()) + "\n"
+    except Exception as exc:
+        logger.exception("Error during graph streaming")
+        err = StreamEvent(event="error", message=str(exc))
+        yield json.dumps(err.model_dump()) + "\n"
+        return
+
+    _sessions[session_id] = accumulated
+    response = _build_response(session_id, accumulated)
+
+    complete = StreamEvent(event="complete", data=response.model_dump())
+    yield json.dumps(complete.model_dump()) + "\n"
+
+
+@router.post("/query/stream")
+async def create_query_stream(
+    req: QueryRequest,
+    _: str = Depends(require_api_key),
+    db: object | None = Depends(get_db),
+) -> StreamingResponse:
+    session_id = req.session_id or str(uuid.uuid4())
+    initial_state = get_initial_state()
+    initial_state["user_query"] = req.user_query
+    initial_state["constraints"] = req.constraints
+    initial_state["messages"] = [HumanMessage(req.user_query)]
+
+    config = {"configurable": {"thread_id": session_id, "session": db}}
+
+    return StreamingResponse(
+        _stream_graph(session_id, initial_state, config),
+        media_type="application/x-ndjson",
+    )

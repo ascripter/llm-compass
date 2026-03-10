@@ -7,11 +7,13 @@ Outputs weighted_benchmarks: List[Dict] with id and weight.
 
 from typing import List, Dict, Any
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from langchain_core.runnables import RunnableConfig
 from sqlalchemy.orm import Session
 
 from llm_compass.config import Settings
-from llm_compass.data.embedding import Embedding
+from llm_compass.data.embedding import get_embedding
 from llm_compass.data.models import BenchmarkDictionary
 from ..state import AgentState
 
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_relevant_benchmarks(
-    queries: List[str], settings: Settings, session: Session, cutoff_score: float = 0.7
+    queries: List[str], settings: Settings, session: Session, cutoff_score: float = 0.0
 ) -> List[Dict[str, Any]]:
     """
     Perform vector search against the Benchmark Dictionary for each query.
@@ -33,12 +35,8 @@ def find_relevant_benchmarks(
     Returns:
         List of dicts: [{"id": "mmlu", "name": "MMLU", "relevance_weight": 0.9}, ...]
     """
-    embedding = Embedding(settings)
+    embedding = get_embedding(settings)
 
-    # Get all benchmark records
-    from llm_compass.data.database import Database
-
-    db = Database(settings)
     with session:
         records = session.query(BenchmarkDictionary).all()
         records_dict = {record.id: record for record in records}
@@ -48,48 +46,50 @@ def find_relevant_benchmarks(
         return []
 
     all_results = []
-    for query in queries:
-        try:
-            results = embedding.search_index(records_dict, query, top_k=10)
-            all_results.extend(results)
-        except Exception as e:
-            logger.error(f"Error searching for query '{query}': {e}")
-            continue
 
-    # Aggregate scores for benchmarks that appear multiple times
+    with ThreadPoolExecutor(max_workers=len(queries)) as executor:
+        futures = {
+            executor.submit(embedding.search_index, records_dict, q, 5): q for q in queries
+        }
+        for future in as_completed(futures):
+            query = futures[future]
+            try:
+                results = future.result()
+                all_results.extend(results)
+            except Exception as e:
+                logger.error(f"Error searching for query '{query}': {e}")
+
+    # Aggregate scores (max) for benchmarks that appear multiple times
     benchmark_scores = {}
     for result in all_results:
         bench_id = result["id"]
         score = result["score"]
+        item = result["item"]
+        logger.debug(f"id {bench_id}: {item.name_normalized}, score={score:.4f}")
         if bench_id not in benchmark_scores:
-            benchmark_scores[bench_id] = {"total_score": 0.0, "count": 0, "item": result["item"]}
-        benchmark_scores[bench_id]["total_score"] += score
-        benchmark_scores[bench_id]["count"] += 1
+            # since item is an sqlalchemy model, we dynamically convert columns to dict
+            benchmark_scores[bench_id] = {
+                c.name: getattr(item, c.name) for c in item.__table__.columns
+            }
+            benchmark_scores[bench_id]["weight"] = 0.0
+        benchmark_scores[bench_id]["weight"] = max(
+            round(score, 4), benchmark_scores[bench_id]["weight"]
+        )
 
-    # Calculate average relevance weight and filter
-    weighted_benchmarks = []
-    for bench_id, data in benchmark_scores.items():
-        avg_score = data["total_score"] / data["count"]
-        if avg_score > cutoff_score:
-            weighted_benchmarks.append(
-                {
-                    "id": data["item"].normalized_name,
-                    "name": data["item"].name,
-                    "relevance_weight": round(avg_score, 3),
-                }
-            )
-
-    # Sort by relevance_weight descending
-    weighted_benchmarks.sort(key=lambda x: x["relevance_weight"], reverse=True)
-
-    logger.info(
-        f"Found {len(weighted_benchmarks)} relevant benchmarks from {len(queries)} queries"
+    results = [v for v in benchmark_scores.values() if v["weight"] > cutoff_score]
+    results.sort(key=lambda v: -v["weight"])
+    logger.debug(
+        "Benchmarks found: "
+        + " | ".join(
+            [f"weight={_['weight']}: {_['name_normalized']} ({_['variant']})" for _ in results]
+        )
     )
-    return weighted_benchmarks
+    logger.info(f"Found {len(results)} relevant benchmarks from {len(queries)} queries")
+    return results
 
 
 def benchmark_discovery_node(
-    state: AgentState, *, settings: Settings, session: Session
+    state: AgentState, config: RunnableConfig, *, settings: Settings
 ) -> AgentState:
     """
     Node 3: Execute find_relevant_benchmarks with search_queries.
@@ -101,14 +101,12 @@ def benchmark_discovery_node(
         state["weighted_benchmarks"] = []
         return state
 
+    session: Session = config["configurable"]["session"]
     try:
         results = find_relevant_benchmarks(search_queries, settings=settings, session=session)
-        # Transform to the expected output format: [{"id": "...", "weight": 0.9}, ...]
-        weighted_benchmarks = [
-            {"id": item["id"], "weight": item["relevance_weight"]} for item in results
-        ]
-        state["weighted_benchmarks"] = weighted_benchmarks
-        logger.info(f"Set weighted_benchmarks: {len(weighted_benchmarks)} items")
+        state["weighted_benchmarks"] = results
+        state["average_benchmark_similarity"] = sum([_["weight"] for _ in results]) / len(results)
+        logger.info(f"Set weighted_benchmarks: {len(results)} items")
     except Exception as e:
         logger.error(f"Error in benchmark discovery: {e}")
         state["weighted_benchmarks"] = []

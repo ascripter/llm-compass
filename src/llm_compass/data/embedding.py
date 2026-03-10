@@ -1,5 +1,6 @@
 """Handle FAISS embeddings for BenchmarkDictionary model."""
 
+from functools import lru_cache
 from typing import Any
 
 import httpx
@@ -111,7 +112,15 @@ class Embedding:
         """
         if self.index is None:
             raise ValueError("FAISS index not found. Please generate the index before searching.")
-        q = self._openrouter_embed([query])
+
+        # modify query to trigger Qwen's asymmetric search capabilities
+        instruct = (
+            "Given a short task description, find the most relevant LLM benchmark descriptions "
+            "that evaluates this capability."
+        )
+        query_instruct = f"Instruct: {instruct}\nQuery: {query}"
+
+        q = self._openrouter_embed([query_instruct])
         faiss.normalize_L2(q)  # same normalization as index vectors
 
         scores, ids = self.index.search(q, top_k)  # type: ignore
@@ -140,3 +149,9 @@ class Embedding:
         # Already sorted by FAISS (best first); keep explicit sort for safety
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
+
+
+@lru_cache(maxsize=None)
+def get_embedding(settings: Settings) -> Embedding:
+    """Return a cached Embedding instance per settings (FAISS index loaded once from disk)."""
+    return Embedding(settings)

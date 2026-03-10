@@ -2,10 +2,9 @@
 Assembles the LangGraph.
 """
 
-from functools import partial
+from functools import lru_cache, partial
 
 from langgraph.graph import StateGraph, END
-from sqlalchemy.orm import Session
 
 from .state import AgentState
 from .nodes import (
@@ -13,14 +12,18 @@ from .nodes import (
     token_ratio_estimation_node,
     query_refiner_node,
     benchmark_discovery_node,
+    execute_ranking,
 )
 from llm_compass.config import Settings, get_settings
-from llm_compass.data.database import Database
 
 
-def build_graph(*, settings: Settings | None = None, session: Session | None = None):
-    settings = settings or get_settings()
-    session = session or Database(settings).SessionLocal()
+@lru_cache(maxsize=1)
+def get_graph(settings: Settings | None = None):
+    """Return a cached compiled graph (built once per settings instance)."""
+    return _build_graph(settings or get_settings())
+
+
+def _build_graph(settings: Settings):
     workflow = StateGraph(AgentState)
 
     workflow.add_node("validator", partial(validate_intent_node, settings=settings))
@@ -28,9 +31,9 @@ def build_graph(*, settings: Settings | None = None, session: Session | None = N
     workflow.add_node("refiner", partial(query_refiner_node, settings=settings))
     workflow.add_node(
         "benchmark_discovery",
-        partial(benchmark_discovery_node, settings=settings, session=session),
+        partial(benchmark_discovery_node, settings=settings),
     )
-    # TODO: add ranking, synthesis nodes
+    workflow.add_node("ranking", execute_ranking)
 
     # Edges
     workflow.set_entry_point("validator")
@@ -52,6 +55,7 @@ def build_graph(*, settings: Settings | None = None, session: Session | None = N
 
     workflow.add_conditional_edges("validator", check_validity)
     workflow.add_edge(["token_ratio", "refiner"], "benchmark_discovery")
-    # TODO: add edges to ranking, synthesis
+    workflow.add_edge("benchmark_discovery", "ranking")
+    workflow.add_edge("ranking", END)
 
     return workflow.compile()

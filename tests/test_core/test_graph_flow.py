@@ -3,7 +3,7 @@ Tests the LangGraph orchestration logic.
 Req 2.3: Verify state transitions.
 """
 
-from llm_compass.agentic_core.graph import build_graph
+from llm_compass.agentic_core.graph import get_graph
 from llm_compass.agentic_core.state import AgentState
 
 

@@ -1,7 +1,9 @@
 """HTTP client for the LLM Compass FastAPI backend."""
 
+import json
 import logging
 import os
+from typing import Generator
 
 import httpx
 
@@ -28,6 +30,23 @@ def post_query(user_query: str, constraints: dict) -> dict:
             data.get("status"),
         )
         return data
+
+
+def post_query_stream(user_query: str, constraints: dict) -> Generator[dict, None, None]:
+    """POST /api/v1/query/stream — stream node-completion events as NDJSON."""
+    payload = {"user_query": user_query, "constraints": constraints}
+    logger.debug("post_query_stream REQUEST | user_query=%r", user_query)
+    with httpx.Client(timeout=_TIMEOUT) as client:
+        with client.stream(
+            "POST",
+            f"{_API_URL}/api/v1/query/stream",
+            json=payload,
+            headers=_HEADERS,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if line.strip():
+                    yield json.loads(line)
 
 
 def post_clarify(session_id: str, user_reply: str, constraints: dict) -> dict:
