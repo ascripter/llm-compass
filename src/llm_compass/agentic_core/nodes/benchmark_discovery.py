@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_relevant_benchmarks(
-    queries: List[str], settings: Settings, session: Session, cutoff_score: float = 0.7
+    queries: List[str], settings: Settings, session: Session, cutoff_score: float = 0.5
 ) -> List[Dict[str, Any]]:
     """
     Perform vector search against the Benchmark Dictionary for each query.
@@ -57,15 +57,15 @@ def find_relevant_benchmarks(
                 all_results.extend(results)
             except Exception as e:
                 logger.error(f"Error searching for query '{query}': {e}")
-
-    # Aggregate scores for benchmarks that appear multiple times
+    logger.debug(f"Benchmarks found: {all_results}")
+    # Aggregate scores (max) for benchmarks that appear multiple times
     benchmark_scores = {}
     for result in all_results:
         bench_id = result["id"]
         score = result["score"]
         if bench_id not in benchmark_scores:
-            benchmark_scores[bench_id] = {"total_score": 0.0, "count": 0, "item": result["item"]}
-        benchmark_scores[bench_id]["total_score"] += score
+            benchmark_scores[bench_id] = {"score": 0.0, "count": 0, "item": result["item"]}
+        benchmark_scores[bench_id]["score"] = max(score, benchmark_scores[bench_id]["score"])
         benchmark_scores[bench_id]["count"] += 1
 
     # Calculate average relevance weight and filter
