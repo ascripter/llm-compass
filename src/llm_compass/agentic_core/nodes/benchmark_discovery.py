@@ -7,6 +7,7 @@ Outputs weighted_benchmarks: List[Dict] with id and weight.
 
 from typing import List, Dict, Any
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy.orm import Session
 
@@ -48,13 +49,18 @@ def find_relevant_benchmarks(
         return []
 
     all_results = []
-    for query in queries:
-        try:
-            results = embedding.search_index(records_dict, query, top_k=10)
-            all_results.extend(results)
-        except Exception as e:
-            logger.error(f"Error searching for query '{query}': {e}")
-            continue
+
+    with ThreadPoolExecutor(max_workers=len(queries)) as executor:
+        futures = {
+            executor.submit(embedding.search_index, records_dict, q, 5): q for q in queries
+        }
+        for future in as_completed(futures):
+            query = futures[future]
+            try:
+                results = future.result()
+                all_results.extend(results)
+            except Exception as e:
+                logger.error(f"Error searching for query '{query}': {e}")
 
     # Aggregate scores for benchmarks that appear multiple times
     benchmark_scores = {}
