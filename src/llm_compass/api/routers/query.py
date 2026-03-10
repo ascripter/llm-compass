@@ -68,7 +68,7 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
             reasoning = getattr(intent, "reasoning", "")
             inputs = getattr(intent, "intended_input_modalities", [])
             outputs = getattr(intent, "intended_output_modalities", [])
-        parts.append("## Intent Analysis")
+        parts.append("## Intent Analysis (DEBUG OUTPUT)")
         if reasoning:
             parts.append(reasoning)
         parts.append(f"**Input modalities:** {', '.join(inputs) if inputs else 'none detected'}")
