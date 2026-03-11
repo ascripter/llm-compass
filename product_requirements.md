@@ -358,14 +358,49 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
   - Generate the 3 Ranking Lists (Performance, Balanced, Budget).
 - **Output:** `ranked_lists: Dict[str, List]` (The three lists).
 
-#### Node 5: Synthesis (LLM)
-- **Input:** `ranked_lists` + user's task summary
-- **Task:**
-  1. Phrase the user's intended task as the LLM understood it
-  2. Executive summary of top picks and why they were picked
-  3. Present the three lists clearly (using tabs or distinct sections in Markdown).
-  4. **Requirement:** Explicitly mention if "Offset Calibration" was used (e.g., "Note: Scores for Model X were estimated based on Variant A due to missing data for Variant B").
-- **Output:** Final Response.
+#### Node 5: Synthesis (LLM + Deterministic)
+- **Input:** `ranked_lists` (`RankedLists` from Node 4) + full `AgentState`
+- **Task:** Produce the final `SynthesisOutput` (aliased as `UIComponents` in the API
+  layer) for the frontend by combining LLM-generated text with deterministically-built
+  structured data.
+
+  **LLM-Generated Components:**
+  1. **Task Summary:** 1-2 sentence rephrasing of the user's intended task.
+  2. **Executive Summary:** 3-5 sentence markdown highlighting top performance
+     winner, budget winner, key trade-offs, and most relevant benchmarks.
+  3. **Recommendation Reasons:** One reason per category (`top_performance`,
+     `balanced`, `budget`) explaining why the model wins, referencing benchmarks.
+  4. **Offset Calibration Note:** If any `is_estimated=true` scores exist,
+     note which models/benchmarks were estimated. Null otherwise.
+
+  **Deterministic Components (no LLM):**
+  1. **Comparison Table:** Base columns: Model, Provider, Blended Score,
+     Cost Index, Speed (tps), Est?. Additional columns: top-N benchmark names
+     by weight. One row per unique model (deduplicated across lists), sorted
+     by `blended_score` desc.
+  2. **Recommendation Cards:** Top-1 model from each ranking list. If the same
+     model wins multiple categories, collapse to fewer cards.
+  3. **Citations:** Unique `(benchmark_name, source_url)` pairs from all
+     non-estimated benchmark results. Deduplicated by URL.
+  4. **Warnings:** Data quality signals:
+     - `LOW_RELEVANCE`: `average_benchmark_similarity < 0.6`
+     - `PARTIAL_COST_DATA`: any top-3 model has `cost_null_fraction > 0.3`
+     - `ESTIMATED_SCORES`: any top-3 model uses estimated scores
+     - `FEW_CANDIDATES`: any ranking list has < 3 models
+
+- **Output:** `SynthesisOutput` stored as `final_response` in `AgentState`.
+  Fields: `summary_markdown`, `comparison_table`, `recommendation_cards`,
+  `citations`, `warnings`.
+- **Assembly:** `summary_markdown` is:
+  ```
+  ## Your Task
+  {task_summary}
+
+  ## Recommendations
+  {executive_summary}
+
+  > **Note:** {offset_calibration_note}  (only if estimated scores exist)
+  ```
 
 
 ## 3. UI/UX
