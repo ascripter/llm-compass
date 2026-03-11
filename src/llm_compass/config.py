@@ -148,6 +148,7 @@ class Settings:
         silence_modules = [
             "httpcore.http11",
             "httpcore.connection",
+            "sqlalchemy.engine.Engine",
             "uvicorn.access",
             "uvicorn.error",
         ]
