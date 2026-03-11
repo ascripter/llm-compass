@@ -1,21 +1,23 @@
-"""Node 5: Synthesis — deterministic stub (no LLM call yet).
+"""Node 5: Synthesis (LLM + Deterministic).
 
 Builds the final ``SynthesisOutput`` from ranked results and pipeline state.
-The LLM-generated natural-language parts (SynthesisLLMOutput) will be added
-in a future iteration; for now we produce a fallback markdown summary and
-populate all deterministic components.
+The LLM generates natural-language parts (task summary, executive summary,
+recommendation reasons, offset calibration note); deterministic helpers build
+the comparison table, recommendation cards, citations, and warnings.
 """
 
 import logging
 from typing import Any, Dict, List
 
-from langgraph.types import RunnableConfig
+from langchain_core.messages import HumanMessage, SystemMessage
 
+from llm_compass.config import Settings
 from ..schemas.ranking import RankedLists, RankedModel
 from ..schemas.synthesis import (
     Citation,
     ComparisonTable,
     RecommendationCard,
+    SynthesisLLMOutput,
     SynthesisOutput,
     Warning,
 )
@@ -167,15 +169,23 @@ def _generate_warnings(state: dict[str, Any], ranked: RankedLists) -> list[Warni
     return warnings
 
 
-def _pick_recommendation_cards(ranked: RankedLists) -> list[RecommendationCard]:
-    """Top-1 from each list, collapsing duplicates."""
+def _pick_recommendation_cards(
+    ranked: RankedLists,
+    llm_reasons: Dict[str, str] | None = None,
+) -> list[RecommendationCard]:
+    """Top-1 from each list, collapsing duplicates.
+
+    If *llm_reasons* is provided, use LLM-generated reasons keyed by
+    ``top_performance``, ``balanced``, ``budget``; fall back to the
+    ranking node's ``reason_for_ranking`` otherwise.
+    """
     seen: set[int] = set()
     cards: list[RecommendationCard] = []
 
-    for label, model_list in [
-        ("Top Performance", ranked.top_performance),
-        ("Balanced", ranked.balanced),
-        ("Budget", ranked.budget),
+    for key, label, model_list in [
+        ("top_performance", "Top Performance", ranked.top_performance),
+        ("balanced", "Balanced", ranked.balanced),
+        ("budget", "Budget", ranked.budget),
     ]:
         if not model_list:
             continue
@@ -183,11 +193,15 @@ def _pick_recommendation_cards(ranked: RankedLists) -> list[RecommendationCard]:
         if m.model_id in seen:
             continue
         seen.add(m.model_id)
+        reason = (
+            (llm_reasons or {}).get(key)
+            or m.reason_for_ranking
+        )
         cards.append(
             RecommendationCard(
                 category=label,
                 model_name=m.name_normalized,
-                reason=m.reason_for_ranking,
+                reason=reason,
             )
         )
 
@@ -238,27 +252,160 @@ def _build_fallback_summary(state: dict[str, Any], ranked: RankedLists) -> str:
     return "\n\n".join(parts)
 
 
+def _assemble_summary_markdown(llm_out: SynthesisLLMOutput) -> str:
+    """Assemble ``summary_markdown`` from LLM output per PRD Node 5 spec."""
+    parts = [
+        f"## Your Task\n\n{llm_out.task_summary}",
+        f"## Recommendations\n\n{llm_out.executive_summary}",
+    ]
+    if llm_out.offset_calibration_note:
+        parts.append(f"> **Note:** {llm_out.offset_calibration_note}")
+    return "\n\n".join(parts)
+
+
+def _has_estimated_scores(ranked: RankedLists) -> bool:
+    """Return True if any model across all lists has estimated benchmark scores."""
+    for model_list in [ranked.top_performance, ranked.balanced, ranked.budget]:
+        for m in model_list:
+            if any(br.is_estimated for br in m.benchmark_results):
+                return True
+    return False
+
+
+def _build_ranking_context(ranked: RankedLists) -> str:
+    """Build a concise text summary of ranked results for the LLM prompt."""
+    lines: list[str] = []
+    for key, label in [
+        ("top_performance", "Top Performance"),
+        ("balanced", "Balanced"),
+        ("budget", "Budget"),
+    ]:
+        model_list = getattr(ranked, key, [])
+        if not model_list:
+            lines.append(f"\n### {label}: (no models)")
+            continue
+        lines.append(f"\n### {label}")
+        for i, m in enumerate(model_list[:3], 1):
+            rm = m.rank_metrics
+            provider_str = f" ({m.provider})" if m.provider else ""
+            lines.append(
+                f"{i}. {m.name_normalized}{provider_str}"
+                f" | perf={rm.performance_index:.3f}"
+                f" | cost_idx={rm.blended_cost_index:.3f}"
+                f" | blended={rm.blended_score:.3f}"
+            )
+            for br in m.benchmark_results:
+                est_tag = " [ESTIMATED]" if br.is_estimated else ""
+                lines.append(
+                    f"   - {br.benchmark_name}"
+                    f"{f' ({br.benchmark_variant})' if br.benchmark_variant else ''}"
+                    f": {br.score:.2f} {br.metric_unit} (weight={br.weight_used:.2f}){est_tag}"
+                )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# LLM prompt
+# ---------------------------------------------------------------------------
+
+SYNTHESIS_SYSTEM_PROMPT = """You are The Benchmark Analyst, producing the final summary \
+for a developer who asked which LLM best fits their task.
+
+You will receive:
+- The user's original query and validated intent.
+- Ranked model lists (top_performance, balanced, budget) with benchmark scores.
+
+Your job is to produce ONLY the natural-language parts of the response. \
+The comparison table, citations, and warnings are built deterministically — \
+do NOT reproduce them.
+
+Follow the output schema strictly."""
+
+
 # ---------------------------------------------------------------------------
 # Node entry point
 # ---------------------------------------------------------------------------
 
 
-def synthesis_node(state: AgentState, config: RunnableConfig) -> dict:
-    """Node 5 — deterministic stub.
+def synthesis_node(state: AgentState, settings: Settings) -> dict:
+    """Node 5 — Synthesis (LLM + Deterministic).
 
-    Builds final ``SynthesisOutput`` from ranked results and pipeline state.
+    Calls an LLM to generate natural-language summaries, then combines them
+    with deterministically-built structured components.
     """
-    ranked = state.get("ranked_results")
-    if ranked is None:
+    ranked_raw = state.get("ranked_results")
+    if ranked_raw is None:
         ranked = RankedLists()
+    elif isinstance(ranked_raw, dict):
+        ranked = RankedLists(**ranked_raw)
+    else:
+        ranked = ranked_raw
 
+    has_models = bool(ranked.top_performance or ranked.balanced or ranked.budget)
+    has_estimated = _has_estimated_scores(ranked)
+
+    logger.debug(
+        "synthesis_node ENTRY"
+        " | user_query=%r"
+        " | top_performance=%d | balanced=%d | budget=%d"
+        " | has_estimated=%s",
+        state.get("user_query", "")[:80],
+        len(ranked.top_performance),
+        len(ranked.balanced),
+        len(ranked.budget),
+        has_estimated,
+    )
+
+    # --- Deterministic components (always built) ---
     comparison_table = _build_comparison_table(ranked)
     citations = _extract_citations(ranked)
     warnings = _generate_warnings(state, ranked)
-    recommendation_cards = _pick_recommendation_cards(ranked)
-    summary = _build_fallback_summary(state, ranked)
+
+    logger.debug(
+        "synthesis_node deterministic | table_rows=%d | citations=%d | warnings=%d",
+        len(comparison_table.rows),
+        len(citations),
+        len(warnings),
+    )
+
+    # --- LLM call ---
+    llm_output: SynthesisLLMOutput | None = None
+    logs: list[str] = []
+
+    if not has_models:
+        logger.warning("synthesis_node | no ranked models — skipping LLM call, using fallback")
+    else:
+        try:
+            llm_output = _invoke_synthesis_llm(state, ranked, settings)
+            logger.debug(
+                "synthesis_node LLM | task_summary_len=%d | exec_summary_len=%d"
+                " | reasons_keys=%s | calibration_note=%s",
+                len(llm_output.task_summary),
+                len(llm_output.executive_summary),
+                list(llm_output.recommendation_reasons.keys()),
+                llm_output.offset_calibration_note is not None,
+            )
+            logs.append("Synthesis: LLM generated summary.")
+        except Exception:
+            logger.exception(
+                "synthesis_node | LLM call failed; falling back to deterministic summary"
+            )
+            logs.append("Synthesis: LLM call failed, using deterministic fallback.")
+
+    # --- Recommendation cards (use LLM reasons when available) ---
+    recommendation_cards = _pick_recommendation_cards(
+        ranked,
+        llm_reasons=llm_output.recommendation_reasons if llm_output else None,
+    )
+
+    # --- Assemble summary markdown ---
+    if llm_output is not None:
+        summary = _assemble_summary_markdown(llm_output)
+    else:
+        summary = _build_fallback_summary(state, ranked)
 
     output = SynthesisOutput(
+        llm_output=llm_output,
         summary_markdown=summary,
         comparison_table=comparison_table,
         recommendation_cards=recommendation_cards,
@@ -267,13 +414,70 @@ def synthesis_node(state: AgentState, config: RunnableConfig) -> dict:
     )
 
     logger.info(
-        "Synthesis complete | cards=%d | citations=%d | warnings=%d",
+        "synthesis_node EXIT | llm_used=%s | cards=%d | citations=%d | warnings=%d",
+        llm_output is not None,
         len(recommendation_cards),
         len(citations),
         len(warnings),
     )
 
+    logs.append("Synthesis: generated final response.")
     return {
         "final_response": output,
-        "logs": ["Synthesis: generated final response."],
+        "logs": logs,
     }
+
+
+def _invoke_synthesis_llm(
+    state: dict[str, Any],
+    ranked: RankedLists,
+    settings: Settings,
+) -> SynthesisLLMOutput:
+    """Call the LLM to produce the natural-language synthesis components."""
+    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0.3)
+    structured_llm = llm.with_structured_output(SynthesisLLMOutput)
+
+    # Build context for the LLM
+    user_query = state.get("user_query", "")
+    intent = state.get("intent_extraction")
+    intent_reasoning = ""
+    if intent is not None:
+        if isinstance(intent, dict):
+            intent_reasoning = intent.get("reasoning", "")
+        else:
+            intent_reasoning = getattr(intent, "reasoning", "")
+
+    has_estimated = _has_estimated_scores(ranked)
+    ranking_context = _build_ranking_context(ranked)
+
+    user_msg_parts = [
+        f"User query: {user_query}",
+        f"Validated intent: {intent_reasoning}",
+        f"\nRanked results:{ranking_context}",
+    ]
+    if has_estimated:
+        user_msg_parts.append(
+            "\nSome scores are ESTIMATED (marked [ESTIMATED] above). "
+            "You MUST provide an offset_calibration_note explaining which "
+            "models/benchmarks were estimated."
+        )
+    else:
+        user_msg_parts.append(
+            "\nNo estimated scores. Set offset_calibration_note to null."
+        )
+
+    messages = [
+        SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT),
+        HumanMessage(content="\n".join(user_msg_parts)),
+    ]
+
+    logger.debug(
+        "_invoke_synthesis_llm | user_query=%r | intent_reasoning_len=%d"
+        " | has_estimated=%s | ranking_context_len=%d",
+        user_query[:80],
+        len(intent_reasoning),
+        has_estimated,
+        len(ranking_context),
+    )
+
+    return structured_llm.invoke(messages)  # type: ignore[return-value]

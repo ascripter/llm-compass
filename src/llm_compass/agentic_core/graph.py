@@ -35,7 +35,7 @@ def _build_graph(settings: Settings):
         partial(benchmark_discovery_node, settings=settings),
     )
     workflow.add_node("ranking", execute_ranking)
-    workflow.add_node("synthesis", synthesis_node)
+    workflow.add_node("synthesis", partial(synthesis_node, settings=settings))
 
     # Edges
     workflow.set_entry_point("validator")
