@@ -236,8 +236,10 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     {
       "model_id": "uuid-123",
       "name_normalized": "Llama 3 70B",
+      "provider": "Meta",
       "speed_class": "slow|medium|fast",
       "speed_tps": 80,
+      "cost_null_fraction": 0.20, // if not all modalities have costs known
       "rank_metrics": {
           "performance_index": 0.88,
           "blended_cost_index": 0.45,
@@ -287,9 +289,11 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     // ... cheap models
   ],
   "metadata": {
-    "applied_io_ratio": {"input": 0.8, "output": 0.2},
-    "benchmarks_used": ["HumanEval", "MBPP", "Swe-Bench"],  // redundant but easily accessible
-    "benchmark_weights" [82.5, 70.2, 22.0]  // redundant but easily accessible
+    "token_ratio_estimation": {...},
+    // redundant but easily accessible
+    "benchmarks_used": ["HumanEval", "MBPP", "Swe-Bench"],
+    "benchmark_scores": [82.5, 70.2, 22.0],
+    "benchmark_weights": [0.5, 0.3, 0.2]
   }
 }
 ```
@@ -355,12 +359,12 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
 - **Output:** `ranked_lists: Dict[str, List]` (The three lists).
 
 #### Node 5: Synthesis (LLM)
-- **Input:** `ranked_lists` + User Query.
+- **Input:** `ranked_lists` + user's task summary
 - **Task:**
-  1. Answer the user's specific question using the data.
-  2. Present the three lists clearly (using tabs or distinct sections in Markdown).
-  3. **Requirement:** Explicitly mention if "Offset Calibration" was used (e.g., "Note: Scores for Model X were estimated based on Variant A due to missing data for Variant B").
-  4. **Fallback:** If a user asked for a specific model that is missing, explain why (e.g., "Filtered by 'Open Weights' constraint").
+  1. Phrase the user's intended task as the LLM understood it
+  2. Executive summary of top picks and why they were picked
+  3. Present the three lists clearly (using tabs or distinct sections in Markdown).
+  4. **Requirement:** Explicitly mention if "Offset Calibration" was used (e.g., "Note: Scores for Model X were estimated based on Variant A due to missing data for Variant B").
 - **Output:** Final Response.
 
 

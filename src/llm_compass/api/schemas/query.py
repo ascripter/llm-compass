@@ -65,6 +65,12 @@ class RankedModel(BaseModel):
     provider: str
     speed_class: Optional[SpeedClass] = None
     speed_tps: Optional[float] = None
+    cost_null_fraction: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of weighted cost data that was missing (0=fully known, 1=all null)",
+    )
     rank_metrics: RankMetrics
     benchmark_results: List[BenchmarkResult]
     reason_for_ranking: str

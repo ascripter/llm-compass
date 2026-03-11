@@ -129,8 +129,10 @@ class TestCalculateBlendedCost:
             "normalized_input_ratios": {"text": 0.5},
             "normalized_output_ratios": {"text": 0.5},
         }
-        result = _calculate_blended_cost(model, ratio)  # type: ignore[arg-type]
-        assert result == pytest.approx(0.5 * 1.0 + 0.5 * 2.0)
+        cost, null_frac = _calculate_blended_cost(model, ratio)  # type: ignore[arg-type]
+        # non_null_weight = 1.0, numerator = 0.5*1.0 + 0.5*2.0 = 1.5
+        assert cost == pytest.approx(1.5)
+        assert null_frac == pytest.approx(0.0)
 
     def test_all_modalities(self):
         model = self._model(
@@ -144,23 +146,62 @@ class TestCalculateBlendedCost:
             cost_output_video_1s=8.0,
         )
         ratio = {
-            "normalized_input_ratios": {"text": 0.1, "image": 0.1, "audio": 0.1, "video": 0.1},
-            "normalized_output_ratios": {"text": 0.1, "image": 0.1, "audio": 0.1, "video": 0.1},
+            "normalized_input_ratios": {"text": 0.125, "image": 0.125, "audio": 0.125, "video": 0.125},
+            "normalized_output_ratios": {"text": 0.125, "image": 0.125, "audio": 0.125, "video": 0.125},
         }
-        expected = 0.1 * (1 + 3 + 5 + 7) + 0.1 * (2 + 4 + 6 + 8)
-        assert _calculate_blended_cost(model, ratio) == pytest.approx(expected)
+        # numerator = 0.125*(1+3+5+7+2+4+6+8) = 0.125*36 = 4.5
+        # non_null_weight = 1.0, so cost = 4.5
+        cost, null_frac = _calculate_blended_cost(model, ratio)  # type: ignore[arg-type]
+        assert cost == pytest.approx(4.5)
+        assert null_frac == pytest.approx(0.0)
 
-    def test_none_costs_treated_as_zero(self):
+    def test_all_null_costs(self):
         model = self._model(cost_input_text_1m=None, cost_output_text_1m=None)
         ratio = {
             "normalized_input_ratios": {"text": 1.0},
             "normalized_output_ratios": {"text": 1.0},
         }
-        assert _calculate_blended_cost(model, ratio) == 0.0  # type: ignore[arg-type]
+        cost, null_frac = _calculate_blended_cost(model, ratio)  # type: ignore[arg-type]
+        assert cost == 0.0
+        assert null_frac == pytest.approx(1.0)
 
     def test_empty_ratios(self):
         model = self._model()
-        assert _calculate_blended_cost(model, {}) == 0.0  # type: ignore[arg-type]
+        cost, null_frac = _calculate_blended_cost(model, {})  # type: ignore[arg-type]
+        assert cost == 0.0
+        assert null_frac == 0.0
+
+    def test_partial_null_costs(self):
+        """One cost present, one null → rescaled cost and 50% null fraction."""
+        model = self._model(cost_input_text_1m=4.0, cost_output_text_1m=None)
+        ratio = {
+            "normalized_input_ratios": {"text": 0.5},
+            "normalized_output_ratios": {"text": 0.5},
+        }
+        cost, null_frac = _calculate_blended_cost(model, ratio)  # type: ignore[arg-type]
+        # numerator = 0.5*4.0 = 2.0, non_null_weight = 0.5
+        # cost = 2.0/0.5 = 4.0 (rescaled over known data only)
+        assert cost == pytest.approx(4.0)
+        assert null_frac == pytest.approx(0.5)
+
+    def test_mixed_modalities_with_some_null(self):
+        """Text costs present, image costs null → null fraction reflects image weight."""
+        model = self._model(
+            cost_input_text_1m=2.0,
+            cost_output_text_1m=4.0,
+            cost_input_image_1024=None,
+            cost_output_image_1024=None,
+        )
+        ratio = {
+            "normalized_input_ratios": {"text": 0.3, "image": 0.2},
+            "normalized_output_ratios": {"text": 0.3, "image": 0.2},
+        }
+        cost, null_frac = _calculate_blended_cost(model, ratio)  # type: ignore[arg-type]
+        # non_null_weight = 0.3+0.3 = 0.6, null_weight = 0.2+0.2 = 0.4
+        # numerator = 0.3*2.0 + 0.3*4.0 = 1.8
+        # cost = 1.8/0.6 = 3.0
+        assert cost == pytest.approx(3.0)
+        assert null_frac == pytest.approx(0.4)
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +348,47 @@ class TestRetrieveAndRankModels:
                 assert "blended_cost_1m_usd" not in entry
                 assert "performance_index" not in entry
                 assert "blended_cost_index" not in entry
+                # cost_null_fraction should survive into output
+                assert "cost_null_fraction" in entry
+
+    def test_cost_null_fraction_in_output(self, db_session):
+        """Models with null cost fields get a non-zero cost_null_fraction."""
+        bench = make_benchmark(db_session)
+        # Model with only input text cost, output text cost is None
+        m = make_model(
+            db_session, name="partial-cost",
+            cost_input_text_1m=5.0, cost_output_text_1m=None,
+        )
+        make_score(db_session, m, bench, score_value=70.0)
+
+        result = retrieve_and_rank_models(
+            benchmark_weights=[{"id": bench.id, "weight": 1.0, "name": bench.name_normalized}],
+            constraints={},
+            token_ratio_estimation=_text_only_token_ratio(),
+            session=db_session,
+        )
+        for list_name in ["top_performance", "balanced", "budget"]:
+            entry = result[list_name][0]
+            assert entry["cost_null_fraction"] == pytest.approx(0.5)
+
+    def test_cost_null_fraction_zero_when_all_present(self, db_session):
+        """Models with all cost fields present get cost_null_fraction == 0."""
+        bench = make_benchmark(db_session)
+        m = make_model(
+            db_session, name="full-cost",
+            cost_input_text_1m=1.0, cost_output_text_1m=2.0,
+        )
+        make_score(db_session, m, bench, score_value=70.0)
+
+        result = retrieve_and_rank_models(
+            benchmark_weights=[{"id": bench.id, "weight": 1.0, "name": bench.name_normalized}],
+            constraints={},
+            token_ratio_estimation=_text_only_token_ratio(),
+            session=db_session,
+        )
+        for list_name in ["top_performance", "balanced", "budget"]:
+            entry = result[list_name][0]
+            assert entry["cost_null_fraction"] == pytest.approx(0.0)
 
     def test_metadata_fields_present(self, db_session):
         bench = make_benchmark(db_session, name="mmlu")

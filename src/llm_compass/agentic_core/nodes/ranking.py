@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from llm_compass.config import Settings
 from llm_compass.common.schemas import Constraints
+from llm_compass.common.types import MODALITY_VALUES
 from llm_compass.data.models import LLMMetadata, BenchmarkScore, BenchmarkDictionary
 from ..schemas import IntentExtraction, QueryExpansion
 from ..state import AgentState
@@ -24,33 +25,53 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Unit suffix per modality — must match LLMMetadata column naming convention
+_COST_UNIT_SUFFIX: Dict[str, str] = {
+    "text": "1m",
+    "image": "1024",
+    "audio": "1h",
+    "video": "1s",
+}
+
+# Build cost terms dynamically from MODALITY_VALUES: (ratio_dict_key, modality, model_attr_name)
+_COST_TERMS: List[Tuple[str, str, str]] = []
+for _modality in MODALITY_VALUES:
+    _suffix = _COST_UNIT_SUFFIX[_modality]
+    _COST_TERMS.append(("normalized_input_ratios", _modality, f"cost_input_{_modality}_{_suffix}"))
+    _COST_TERMS.append(("normalized_output_ratios", _modality, f"cost_output_{_modality}_{_suffix}"))
+
 
 def _calculate_blended_cost(
     model: LLMMetadata, token_ratio_estimation: Dict[str, Dict[str, float]]
-) -> float:
+) -> Tuple[float, float]:
     """
     Calculate blended cost based on I/O ratios and model pricing.
 
-    Formula: sum(token_ratio_estimation[mode][modality] * cost_from_llm_metadata)
+    Returns:
+        (blended_cost, null_fraction) where null_fraction is the fraction of
+        requested cost weight that had missing (None) data. The blended_cost is
+        rescaled to average only over modalities with known pricing.
     """
-    input_ratios = token_ratio_estimation.get("normalized_input_ratios", {})
-    output_ratios = token_ratio_estimation.get("normalized_output_ratios", {})
+    numerator = 0.0
+    non_null_weight = 0.0
+    null_weight = 0.0
 
-    blended_cost = 0.0
+    for ratio_key, modality, cost_attr in _COST_TERMS:
+        ratio = token_ratio_estimation.get(ratio_key, {}).get(modality, 0.0)
+        if ratio == 0.0:
+            continue
+        cost = getattr(model, cost_attr)
+        if cost is not None:
+            numerator += ratio * cost
+            non_null_weight += ratio
+        else:
+            null_weight += ratio
 
-    # Input costs
-    blended_cost += input_ratios.get("text", 0) * (model.cost_input_text_1m or 0)
-    blended_cost += input_ratios.get("image", 0) * (model.cost_input_image_1024 or 0)
-    blended_cost += input_ratios.get("audio", 0) * (model.cost_input_audio_1h or 0)
-    blended_cost += input_ratios.get("video", 0) * (model.cost_input_video_1s or 0)
+    total_weight = non_null_weight + null_weight
+    null_fraction = null_weight / total_weight if total_weight > 0 else 0.0
+    blended_cost = numerator / non_null_weight if non_null_weight > 0 else 0.0
 
-    # Output costs
-    blended_cost += output_ratios.get("text", 0) * (model.cost_output_text_1m or 0)
-    blended_cost += output_ratios.get("image", 0) * (model.cost_output_image_1024 or 0)
-    blended_cost += output_ratios.get("audio", 0) * (model.cost_output_audio_1h or 0)
-    blended_cost += output_ratios.get("video", 0) * (model.cost_output_video_1s or 0)
-
-    return blended_cost
+    return blended_cost, null_fraction
 
 
 def _normalize_scores_to_0_1(scores: List[float]) -> List[float]:
@@ -339,7 +360,7 @@ def retrieve_and_rank_models(
         if benchmark_results:  # Only include models with at least some benchmark data
             # Step 4: Calculate Blended Cost
             logger.debug(f"include model: {model.name_normalized}")
-            blended_cost = _calculate_blended_cost(model, token_ratio_estimation)
+            blended_cost, cost_null_fraction = _calculate_blended_cost(model, token_ratio_estimation)
 
             model_results.append(
                 {
@@ -349,6 +370,7 @@ def retrieve_and_rank_models(
                     "speed_tps": model.speed_tps,
                     "benchmark_results": benchmark_results,
                     "blended_cost_1m_usd": blended_cost,
+                    "cost_null_fraction": cost_null_fraction,
                     "raw_performance_score": sum(performance_scores),
                 }
             )
