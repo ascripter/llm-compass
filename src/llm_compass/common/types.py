@@ -5,6 +5,8 @@ from typing import Literal, get_args
 
 type ModelType = Literal["base", "instruct", "thinking", "generator"]
 type Modality = Literal["text", "image", "audio", "video"]  # Extendable for future modalities
+# NOTE on future Modality extension: agentic_core/nodes/ranking ONLY works as long as
+# enum strings are not substrings of each other. Otherwise modality filter needs to be adapted
 type SpeedClass = Literal["fast", "medium", "slow"]  # For categorizing model inference speed
 type ReasoningType = Literal["none", "standard", "native cot"]  # For categorizing reasoning
 type ToolCalling = Literal["none", "standard", "agentic"]  # For categorizing tool calling

@@ -186,18 +186,18 @@ def retrieve_and_rank_models(
     query = session.query(LLMMetadata).filter(LLMMetadata.is_outdated == False)
 
     # Apply hard constraints
-    if "min_context_window" in constraints:
+    if "min_context_window" in constraints and constraints["min_context_window"] > 0:
         query = query.filter(LLMMetadata.context_window >= constraints["min_context_window"])
 
     if "modality_input" in constraints and constraints["modality_input"]:
         # Filter models that support ALL required input modalities
         for modality in constraints["modality_input"]:
-            query = query.filter(LLMMetadata.modality_input.contains([modality]))
+            query = query.filter(LLMMetadata.modality_input.contains(f'"{modality}"'))
 
     if "modality_output" in constraints and constraints["modality_output"]:
         # Filter models that support ALL required output modalities
         for modality in constraints["modality_output"]:
-            query = query.filter(LLMMetadata.modality_output.contains([modality]))
+            query = query.filter(LLMMetadata.modality_output.contains(f'"{modality}"'))
 
     if "deployment" in constraints:
         if constraints["deployment"] == "local":
@@ -211,21 +211,12 @@ def retrieve_and_rank_models(
     if "tool_calling" in constraints and constraints["tool_calling"]:
         query = query.filter(LLMMetadata.tool_calling != "none")
 
-    if "min_speed_class" in constraints:
-        speed_order = {"slow": 0, "medium": 1, "fast": 2}
-        min_speed_value = speed_order.get(constraints["min_speed_class"], 0)
+    if "min_speed_class" in constraints and constraints["min_speed_class"] == "medium":
         query = query.filter(
-            or_(
-                LLMMetadata.speed_class == constraints["min_speed_class"],
-                and_(
-                    LLMMetadata.speed_class == "medium", constraints["min_speed_class"] == "slow"
-                ),
-                and_(
-                    LLMMetadata.speed_class == "fast",
-                    constraints["min_speed_class"] in ["slow", "medium"],
-                ),
-            )
+            or_(LLMMetadata.speed_class == "medium", LLMMetadata.speed_class == "fast")
         )
+    elif "min_speed_class" in constraints and constraints["min_speed_class"] == "fast":
+        query = query.filter(LLMMetadata.speed_class == "fast")
 
     filtered_models = query.all()
     logger.debug(
