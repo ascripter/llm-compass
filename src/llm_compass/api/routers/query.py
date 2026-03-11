@@ -15,6 +15,7 @@ from ..schemas.query import (
     ClarifyRequest,
     QueryRequest,
     QueryResponse,
+    RankedLists,
     StreamEvent,
     TraceEvent,
     UIComponents,
@@ -111,10 +112,57 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
         parts.append("\n## Generated Search Queries")
         parts.extend(f"- {q}" for q in search_queries)
 
+    weighted_benchmarks = state.get("weighted_benchmarks") or []
+    if weighted_benchmarks:
+        avg_sim = state.get("average_benchmark_similarity") or 0.0
+        header = f"\n## Discovered Benchmarks\nAverage relevance: {avg_sim:.2f}  ·  {len(weighted_benchmarks)} benchmark(s) matched\n"
+        rows = ["| Benchmark | Variant | Weight |", "|---|---|---|"]
+        for b in weighted_benchmarks:
+            name = b.get("name") or b.get("name_normalized") or b.get("id", "?")
+            variant = b.get("variant") or "—"
+            weight = b.get("weight", 0.0)
+            rows.append(f"| {name} | {variant} | {weight:.3f} |")
+        parts.append(header + "\n".join(rows))
+
+    ranked_results = state.get("ranked_results") or {}
+    categories = [
+        ("top_performance", "Top Performance"),
+        ("balanced", "Balanced"),
+        ("budget", "Budget"),
+    ]
+    ranking_parts: list[str] = []
+    for key, label in categories:
+        models = ranked_results.get(key) or []
+        if not models:
+            continue
+        ranking_parts.append(f"**{label}**")
+        for i, m in enumerate(models[:3], 1):
+            rm = m.get("rank_metrics") or {}
+            blended = rm.get("blended_score", 0.0)
+            name = m.get("name_normalized") or m.get("model_id", "?")
+            provider = m.get("provider", "")
+            provider_str = f" ({provider})" if provider else ""
+            reason = m.get("reason_for_ranking", "")
+            ranking_parts.append(f"{i}. **{name}**{provider_str} — blended score: {blended:.3f}")
+            if reason:
+                ranking_parts.append(f"   _{reason}_")
+    if ranking_parts:
+        parts.append("\n## Ranking Results\n\n" + "\n".join(ranking_parts))
+
     if not parts:
         parts.append("Analysis complete. Ranking and recommendations are not yet available.")
 
     return "\n\n".join(parts)
+
+
+def _parse_ranked_results(raw: Any) -> RankedLists | None:
+    if not raw or not isinstance(raw, dict):
+        return None
+    try:
+        return RankedLists.model_validate(raw)
+    except Exception:
+        logger.debug("Could not parse ranked_results into RankedLists", exc_info=True)
+        return None
 
 
 def _build_response(session_id: str, state: dict[str, Any]) -> QueryResponse:
@@ -164,7 +212,7 @@ def _build_response(session_id: str, state: dict[str, Any]) -> QueryResponse:
         status=status,  # type: ignore[arg-type]
         clarification_question=clarification_question,
         traceability=_build_traceability(state),
-        ranked_data=state.get("ranked_data"),
+        ranked_data=_parse_ranked_results(state.get("ranked_results")),
         ui_components=ui_components,
         errors=errors,
     )
