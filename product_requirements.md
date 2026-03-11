@@ -289,7 +289,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     // ... cheap models
   ],
   "metadata": {
-    "token_ratio_estimation": {...},
+    "applied_io_ratio": {...},
     // redundant but easily accessible
     "benchmarks_used": ["HumanEval", "MBPP", "Swe-Bench"],
     "benchmark_scores": [82.5, 70.2, 22.0],

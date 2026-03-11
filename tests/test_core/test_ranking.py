@@ -15,6 +15,7 @@ from llm_compass.agentic_core.nodes.ranking import (
     execute_ranking,
     retrieve_and_rank_models,
 )
+from llm_compass.agentic_core.schemas.ranking import RankedLists
 from llm_compass.agentic_core.state import AgentState
 from llm_compass.data.models import Base, BenchmarkDictionary, BenchmarkScore, LLMMetadata
 
@@ -242,9 +243,9 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        assert result["top_performance"] == []
-        assert result["balanced"] == []
-        assert result["budget"] == []
+        assert result.top_performance == []
+        assert result.balanced == []
+        assert result.budget == []
 
     def test_no_models_pass_constraint_returns_empty(self, db_session):
         make_model(db_session, name="small-model", context_window=1000)
@@ -255,7 +256,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        assert result["top_performance"] == []
+        assert result.top_performance == []
 
     def test_no_benchmark_data_returns_empty(self, db_session):
         make_model(db_session, name="model-no-scores")
@@ -266,7 +267,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        assert result["top_performance"] == []
+        assert result.top_performance == []
 
     def test_three_lists_returned(self, db_session):
         bench = make_benchmark(db_session)
@@ -280,9 +281,9 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        assert len(result["top_performance"]) == 3
-        assert len(result["balanced"]) == 3
-        assert len(result["budget"]) == 3
+        assert len(result.top_performance) == 3
+        assert len(result.balanced) == 3
+        assert len(result.budget) == 3
 
     def test_top_performance_ordered_by_score(self, db_session):
         bench = make_benchmark(db_session)
@@ -297,7 +298,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        assert result["top_performance"][0]["name_normalized"] == "high-perf"
+        assert result.top_performance[0].name_normalized == "high-perf"
 
     def test_budget_favours_low_cost(self, db_session):
         bench = make_benchmark(db_session)
@@ -313,7 +314,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        assert result["budget"][0]["name_normalized"] == "cheap"
+        assert result.budget[0].name_normalized == "cheap"
 
     def test_rank_metrics_attached_to_all_entries(self, db_session):
         bench = make_benchmark(db_session)
@@ -326,10 +327,10 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        for list_name in ["top_performance", "balanced", "budget"]:
-            for entry in result[list_name]:
-                assert "rank_metrics" in entry
-                assert "reason_for_ranking" in entry
+        for entries in [result.top_performance, result.balanced, result.budget]:
+            for entry in entries:
+                assert entry.rank_metrics is not None
+                assert entry.reason_for_ranking
 
     def test_internal_fields_removed(self, db_session):
         bench = make_benchmark(db_session)
@@ -342,14 +343,17 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        for list_name in ["top_performance", "balanced", "budget"]:
-            for entry in result[list_name]:
-                assert "raw_performance_score" not in entry
-                assert "blended_cost_1m_usd" not in entry
-                assert "performance_index" not in entry
-                assert "blended_cost_index" not in entry
+        for entries in [result.top_performance, result.balanced, result.budget]:
+            for entry in entries:
+                # Internal fields should not be top-level attributes on RankedModel
+                assert not hasattr(entry, "raw_performance_score")
+                assert not hasattr(entry, "blended_cost_1m_usd")
+                # performance_index and blended_cost_index live inside rank_metrics
+                assert entry.rank_metrics is not None
+                assert entry.rank_metrics.performance_index is not None
+                assert entry.rank_metrics.blended_cost_index is not None
                 # cost_null_fraction should survive into output
-                assert "cost_null_fraction" in entry
+                assert entry.cost_null_fraction is not None
 
     def test_cost_null_fraction_in_output(self, db_session):
         """Models with null cost fields get a non-zero cost_null_fraction."""
@@ -367,9 +371,9 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        for list_name in ["top_performance", "balanced", "budget"]:
-            entry = result[list_name][0]
-            assert entry["cost_null_fraction"] == pytest.approx(0.5)
+        for entries in [result.top_performance, result.balanced, result.budget]:
+            entry = entries[0]
+            assert entry.cost_null_fraction == pytest.approx(0.5)
 
     def test_cost_null_fraction_zero_when_all_present(self, db_session):
         """Models with all cost fields present get cost_null_fraction == 0."""
@@ -386,9 +390,9 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        for list_name in ["top_performance", "balanced", "budget"]:
-            entry = result[list_name][0]
-            assert entry["cost_null_fraction"] == pytest.approx(0.0)
+        for entries in [result.top_performance, result.balanced, result.budget]:
+            entry = entries[0]
+            assert entry.cost_null_fraction == pytest.approx(0.0)
 
     def test_metadata_fields_present(self, db_session):
         bench = make_benchmark(db_session, name="mmlu")
@@ -398,9 +402,9 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        assert "applied_io_ratio" in result["metadata"]
-        assert "benchmarks_used" in result["metadata"]
-        assert "benchmark_weights" in result["metadata"]
+        assert "applied_io_ratio" in result.metadata
+        assert "benchmarks_used" in result.metadata
+        assert "benchmark_weights" in result.metadata
 
     def test_constraint_context_window(self, db_session):
         bench = make_benchmark(db_session)
@@ -415,7 +419,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        names = [e["name_normalized"] for e in result["top_performance"]]
+        names = [e.name_normalized for e in result.top_performance]
         assert "large-ctx" in names
         assert "small-ctx" not in names
 
@@ -432,7 +436,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        names = [e["name_normalized"] for e in result["top_performance"]]
+        names = [e.name_normalized for e in result.top_performance]
         assert "local-model" in names
         assert "cloud-model" not in names
 
@@ -449,7 +453,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        names = [e["name_normalized"] for e in result["top_performance"]]
+        names = [e.name_normalized for e in result.top_performance]
         assert "cloud-model" in names
         assert "local-model" not in names
 
@@ -466,7 +470,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        names = [e["name_normalized"] for e in result["top_performance"]]
+        names = [e.name_normalized for e in result.top_performance]
         assert "reasoner-model" in names
         assert "plain-model" not in names
 
@@ -483,7 +487,7 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        names = [e["name_normalized"] for e in result["top_performance"]]
+        names = [e.name_normalized for e in result.top_performance]
         assert "has-tools" in names
         assert "no-tools" not in names
 
@@ -500,9 +504,35 @@ class TestRetrieveAndRankModels:
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
-        names = [e["name_normalized"] for e in result["top_performance"]]
+        names = [e.name_normalized for e in result.top_performance]
         assert "old-model" not in names
         assert "current-model" in names
+
+    def test_returns_ranked_lists_instance(self, db_session):
+        bench = make_benchmark(db_session)
+        m = make_model(db_session)
+        make_score(db_session, m, bench, score_value=80.0)
+
+        result = retrieve_and_rank_models(
+            benchmark_weights=[{"id": bench.id, "weight": 1.0, "name": bench.name_normalized}],
+            constraints={},
+            token_ratio_estimation=_text_only_token_ratio(),
+            session=db_session,
+        )
+        assert isinstance(result, RankedLists)
+
+    def test_provider_present(self, db_session):
+        bench = make_benchmark(db_session)
+        m = make_model(db_session, name="provider-test", provider="TestCo")
+        make_score(db_session, m, bench, score_value=80.0)
+
+        result = retrieve_and_rank_models(
+            benchmark_weights=[{"id": bench.id, "weight": 1.0, "name": bench.name_normalized}],
+            constraints={},
+            token_ratio_estimation=_text_only_token_ratio(),
+            session=db_session,
+        )
+        assert result.top_performance[0].provider == "TestCo"
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +602,8 @@ class TestExecuteRanking:
         result = execute_ranking(state, config)
 
         assert "ranked_results" in result
-        assert "top_performance" in result["ranked_results"]
+        assert isinstance(result["ranked_results"], RankedLists)
+        assert result["ranked_results"].top_performance is not None
 
     def test_empty_weighted_benchmarks_returns_empty_lists(self, db_session):
         state = cast(AgentState, {
@@ -583,6 +614,6 @@ class TestExecuteRanking:
         config = {"configurable": {"session": db_session}}
         result = execute_ranking(state, config)
 
-        assert result["ranked_results"]["top_performance"] == []
-        assert result["ranked_results"]["balanced"] == []
-        assert result["ranked_results"]["budget"] == []
+        assert result["ranked_results"].top_performance == []
+        assert result["ranked_results"].balanced == []
+        assert result["ranked_results"].budget == []

@@ -1,4 +1,6 @@
-from .common import APIError, DeploymentType, ErrorDetail, Modality, PaginatedMeta, Pagination, SpeedClass
+from llm_compass.common.types import DeploymentType, Modality, SpeedClass
+
+from .common import APIError, ErrorDetail, PaginatedMeta, Pagination
 from .query import ClarifyRequest, Constraints, QueryRequest, QueryResponse, TraceEvent
 
 __all__ = [

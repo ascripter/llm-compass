@@ -8,6 +8,8 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
 from llm_compass.agentic_core.graph import get_graph
+from llm_compass.agentic_core.schemas.ranking import RankedLists
+from llm_compass.agentic_core.schemas.synthesis import SynthesisOutput
 from llm_compass.agentic_core.state import get_initial_state, AgentState
 from ..deps import get_db, require_api_key
 from ..schemas.common import ErrorDetail
@@ -15,7 +17,6 @@ from ..schemas.query import (
     ClarifyRequest,
     QueryRequest,
     QueryResponse,
-    RankedLists,
     StreamEvent,
     TraceEvent,
     UIComponents,
@@ -124,7 +125,11 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
             rows.append(f"| {name} | {variant} | {weight:.3f} |")
         parts.append(header + "\n".join(rows))
 
-    ranked_results = state.get("ranked_results") or {}
+    ranked_raw = state.get("ranked_results")
+    if isinstance(ranked_raw, RankedLists):
+        ranked_results = ranked_raw.model_dump()
+    else:
+        ranked_results = ranked_raw or {}
     categories = [
         ("top_performance", "Top Performance"),
         ("balanced", "Balanced"),
@@ -156,12 +161,14 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
 
 
 def _parse_ranked_results(raw: Any) -> RankedLists | None:
+    if isinstance(raw, RankedLists):
+        return raw
     if not raw or not isinstance(raw, dict):
         return None
     try:
         return RankedLists.model_validate(raw)
     except Exception:
-        logger.debug("Could not parse ranked_results into RankedLists", exc_info=True)
+        logger.warning("Could not parse ranked_results into RankedLists", exc_info=True)
         return None
 
 
@@ -197,11 +204,15 @@ def _build_response(session_id: str, state: dict[str, Any]) -> QueryResponse:
     if status == "needs_clarification":
         clarification_question = _extract_clarification_question(state)
 
-    # Build fallback UIComponents from intermediate pipeline results when synthesis not yet done
-    ui_components = state.get("ui_components")
-    if ui_components is None and status == "ok":
+    # Prefer SynthesisOutput from final_response; fall back to intermediate summary
+    final = state.get("final_response")
+    if isinstance(final, SynthesisOutput):
+        ui_components = final
+    elif status == "ok":
         summary = _build_intermediate_summary(state)
         ui_components = UIComponents(summary_markdown=summary)
+    else:
+        ui_components = None
 
     return QueryResponse(
         session_id=session_id,
@@ -278,6 +289,7 @@ _NODE_LABELS = {
     "refiner": "Generating search queries",
     "benchmark_discovery": "Discovering benchmarks",
     "ranking": "Ranking models",
+    "synthesis": "Synthesizing response",
 }
 
 # Keys whose reducer is *append* rather than *overwrite*

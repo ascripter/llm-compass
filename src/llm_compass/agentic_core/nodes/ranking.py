@@ -6,7 +6,6 @@ It finds LLMs for relevant benchmarks, scores and ranks them.
 """
 
 from typing import List, Dict, Any, Optional, Tuple
-import copy
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -18,6 +17,7 @@ from llm_compass.common.schemas import Constraints
 from llm_compass.common.types import MODALITY_VALUES
 from llm_compass.data.models import LLMMetadata, BenchmarkScore, BenchmarkDictionary
 from ..schemas import IntentExtraction, QueryExpansion
+from ..schemas.ranking import BenchmarkResult, RankMetrics, RankedModel, RankedLists
 from ..state import AgentState
 from sqlalchemy import and_, or_, func
 import numpy as np
@@ -37,8 +37,12 @@ _COST_UNIT_SUFFIX: Dict[str, str] = {
 _COST_TERMS: List[Tuple[str, str, str]] = []
 for _modality in MODALITY_VALUES:
     _suffix = _COST_UNIT_SUFFIX[_modality]
-    _COST_TERMS.append(("normalized_input_ratios", _modality, f"cost_input_{_modality}_{_suffix}"))
-    _COST_TERMS.append(("normalized_output_ratios", _modality, f"cost_output_{_modality}_{_suffix}"))
+    _COST_TERMS.append(
+        ("normalized_input_ratios", _modality, f"cost_input_{_modality}_{_suffix}")
+    )
+    _COST_TERMS.append(
+        ("normalized_output_ratios", _modality, f"cost_output_{_modality}_{_suffix}")
+    )
 
 
 def _calculate_blended_cost(
@@ -187,7 +191,7 @@ def retrieve_and_rank_models(
     constraints: dict,
     token_ratio_estimation: dict,
     session: Session,
-) -> dict:
+) -> RankedLists:
     """
     Req 2.2.B: The heavy lifting.
     1. Filter models by constraints (SQL).
@@ -240,16 +244,13 @@ def retrieve_and_rank_models(
 
     if not filtered_models:
         logger.warning("No models passed constraint filter | constraints=%s", constraints)
-        return {
-            "top_performance": [],
-            "balanced": [],
-            "budget": [],
-            "metadata": {
+        return RankedLists(
+            metadata={
                 "applied_io_ratio": token_ratio_estimation,
                 "benchmarks_used": [],
                 "benchmark_weights": [],
             },
-        }
+        )
 
     # Step 2: Score Retrieval
     benchmark_ids = [bw["id"] for bw in benchmark_weights]
@@ -360,12 +361,15 @@ def retrieve_and_rank_models(
         if benchmark_results:  # Only include models with at least some benchmark data
             # Step 4: Calculate Blended Cost
             logger.debug(f"include model: {model.name_normalized}")
-            blended_cost, cost_null_fraction = _calculate_blended_cost(model, token_ratio_estimation)
+            blended_cost, cost_null_fraction = _calculate_blended_cost(
+                model, token_ratio_estimation
+            )
 
             model_results.append(
                 {
                     "model_id": model.id,
                     "name_normalized": model.name_normalized,
+                    "provider": model.provider,
                     "speed_class": model.speed_class,
                     "speed_tps": model.speed_tps,
                     "benchmark_results": benchmark_results,
@@ -381,16 +385,13 @@ def retrieve_and_rank_models(
             len(filtered_models),
             len(benchmark_weights),
         )
-        return {
-            "top_performance": [],
-            "balanced": [],
-            "budget": [],
-            "metadata": {
+        return RankedLists(
+            metadata={
                 "applied_io_ratio": token_ratio_estimation,
                 "benchmarks_used": [bw.get("name") for bw in benchmark_weights],
                 "benchmark_weights": [bw.get("weight") for bw in benchmark_weights],
             },
-        }
+        )
 
     # Calculate normalized indices
     performance_scores = [mr["raw_performance_score"] for mr in model_results]
@@ -414,72 +415,73 @@ def retrieve_and_rank_models(
         mr["blended_cost_index"] = normalized_costs[i]
 
     # Step 5: Generate ranking lists
-    # Each list gets its own deep copy so metadata annotation and field removal
-    # on one list do not corrupt the dicts shared with the other lists.
+    # Build RankedModel objects for each ranking strategy.
+    def _to_ranked_model(mr: dict, blended_score: float, reason: str) -> RankedModel:
+        return RankedModel(
+            model_id=mr["model_id"],
+            name_normalized=mr["name_normalized"],
+            provider=mr["provider"],
+            speed_class=mr["speed_class"],
+            speed_tps=mr["speed_tps"],
+            cost_null_fraction=mr["cost_null_fraction"],
+            rank_metrics=RankMetrics(
+                performance_index=mr["performance_index"],
+                blended_cost_index=mr["blended_cost_index"],
+                blended_score=blended_score,
+            ),
+            benchmark_results=[BenchmarkResult(**br) for br in mr["benchmark_results"]],
+            reason_for_ranking=reason,
+        )
+
     # Performance List: Ranked by Performance_Index
-    top_performance = sorted(
-        copy.deepcopy(model_results), key=lambda x: x["performance_index"], reverse=True
-    )
+    perf_sorted = sorted(model_results, key=lambda x: x["performance_index"], reverse=True)
+    top_performance = [
+        _to_ranked_model(
+            mr, mr["performance_index"], f"Performance Index: {mr['performance_index']:.3f}"
+        )
+        for mr in perf_sorted
+    ]
 
     # Budget List: Ranked by 0.2 * Performance_Index + 0.8 * Blended_Cost_Index
-    budget = sorted(
-        copy.deepcopy(model_results),
+    budget_sorted = sorted(
+        model_results,
         key=lambda x: 0.2 * x["performance_index"] + 0.8 * x["blended_cost_index"],
         reverse=True,
     )
+    budget = [
+        _to_ranked_model(
+            mr,
+            0.2 * mr["performance_index"] + 0.8 * mr["blended_cost_index"],
+            f"Budget-optimized score: {0.2 * mr['performance_index'] + 0.8 * mr['blended_cost_index']:.3f}",
+        )
+        for mr in budget_sorted
+    ]
 
     # Balanced List: Ranked by 0.5 * Performance_Index + 0.5 * Blended_Cost_Index
-    balanced = sorted(
-        copy.deepcopy(model_results),
+    balanced_sorted = sorted(
+        model_results,
         key=lambda x: 0.5 * x["performance_index"] + 0.5 * x["blended_cost_index"],
         reverse=True,
     )
+    balanced = [
+        _to_ranked_model(
+            mr,
+            0.5 * mr["performance_index"] + 0.5 * mr["blended_cost_index"],
+            f"Balanced score: {0.5 * mr['performance_index'] + 0.5 * mr['blended_cost_index']:.3f}",
+        )
+        for mr in balanced_sorted
+    ]
 
-    # Add ranking metadata and clean up
-    for rank_list in [top_performance, balanced, budget]:
-        for i, mr in enumerate(rank_list):
-            if rank_list == top_performance:
-                mr["rank_metrics"] = {
-                    "performance_index": mr["performance_index"],
-                    "blended_cost_index": mr["blended_cost_index"],
-                    "blended_score": mr[
-                        "performance_index"
-                    ],  # Performance list uses performance score
-                }
-                mr["reason_for_ranking"] = f"Performance Index: {mr['performance_index']:.3f}"
-            elif rank_list == budget:
-                blended_score = 0.2 * mr["performance_index"] + 0.8 * mr["blended_cost_index"]
-                mr["rank_metrics"] = {
-                    "performance_index": mr["performance_index"],
-                    "blended_cost_index": mr["blended_cost_index"],
-                    "blended_score": blended_score,
-                }
-                mr["reason_for_ranking"] = f"Budget-optimized score: {blended_score:.3f}"
-            else:  # balanced
-                blended_score = 0.5 * mr["performance_index"] + 0.5 * mr["blended_cost_index"]
-                mr["rank_metrics"] = {
-                    "performance_index": mr["performance_index"],
-                    "blended_cost_index": mr["blended_cost_index"],
-                    "blended_score": blended_score,
-                }
-                mr["reason_for_ranking"] = f"Balanced score: {blended_score:.3f}"
-
-            # Remove internal calculation fields
-            mr.pop("raw_performance_score", None)
-            mr.pop("blended_cost_1m_usd", None)
-            mr.pop("performance_index", None)
-            mr.pop("blended_cost_index", None)
-
-    return {
-        "top_performance": top_performance,
-        "balanced": balanced,
-        "budget": budget,
-        "metadata": {
+    return RankedLists(
+        top_performance=top_performance,
+        balanced=balanced,
+        budget=budget,
+        metadata={
             "applied_io_ratio": token_ratio_estimation,
             "benchmarks_used": [bw.get("name", "") for bw in benchmark_weights],
             "benchmark_weights": [bw.get("weight", 0) for bw in benchmark_weights],
         },
-    }
+    )
 
 
 def execute_ranking(state: AgentState, config: RunnableConfig) -> dict:
@@ -513,16 +515,16 @@ def execute_ranking(state: AgentState, config: RunnableConfig) -> dict:
         session=session,
     )
 
-    top_n = len(ranked_results.get("top_performance", []))
-    bal_n = len(ranked_results.get("balanced", []))
-    bud_n = len(ranked_results.get("budget", []))
+    top_n = len(ranked_results.top_performance)
+    bal_n = len(ranked_results.balanced)
+    bud_n = len(ranked_results.budget)
 
     logger.debug(
         "execute_ranking EXIT | top_performance=%d | balanced=%d | budget=%d | benchmarks_used=%d",
         top_n,
         bal_n,
         bud_n,
-        len(ranked_results.get("metadata", {}).get("benchmarks_used", [])),
+        len(ranked_results.metadata.get("benchmarks_used", [])),
     )
 
     logs = [f"Ranking: ranked {top_n} models (top_performance / balanced / budget lists)."]

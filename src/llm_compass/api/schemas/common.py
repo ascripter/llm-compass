@@ -1,20 +1,6 @@
-from enum import Enum
 from typing import List
 
 from pydantic import BaseModel, Field
-from llm_compass.common.types import DeploymentType
-
-class Modality(str, Enum):
-    TEXT = "text"
-    IMAGE = "image"
-    AUDIO = "audio"
-    VIDEO = "video"
-
-
-class SpeedClass(str, Enum):
-    FAST = "fast"
-    MEDIUM = "medium"
-    SLOW = "slow"
 
 
 class Pagination(BaseModel):

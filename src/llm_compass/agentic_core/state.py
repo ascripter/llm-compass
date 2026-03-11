@@ -11,6 +11,8 @@ from langgraph.graph import MessagesState  # implies `messages` attribute
 from langgraph.graph.message import add_messages
 
 from .schemas import IntentExtraction, TokenRatioEstimation
+from .schemas.ranking import RankedLists
+from .schemas.synthesis import SynthesisOutput
 from ..common.schemas import Constraints
 from ..common.types import Modality
 
@@ -34,10 +36,10 @@ class AgentState(MessagesState):
     average_benchmark_similarity: float  # how well do the benchmarks fit in general
 
     # From Scoring and Ranking (Req 2.3 Node 4)
-    ranked_results: Dict[str, List[Any]]  # "top", "balanced", "budget" lists
+    ranked_results: Optional[RankedLists]
 
     # From Synthesize Node (Req 2.3 Node 5)
-    final_response: Optional[Dict]  # The JSON schema for UI
+    final_response: Optional[SynthesisOutput]
 
     # Traceability (Req 3.3.A)
     logs: Annotated[List[str], add_messages]
@@ -58,7 +60,7 @@ def get_initial_state():
             "search_queries": [],
             "weighted_benchmarks": [],
             "average_benchmark_similarity": 0.0,
-            "ranked_results": {},
+            "ranked_results": None,
             "final_response": None,
             "logs": [],
         }

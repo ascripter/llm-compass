@@ -13,6 +13,7 @@ from .nodes import (
     query_refiner_node,
     benchmark_discovery_node,
     execute_ranking,
+    synthesis_node,
 )
 from llm_compass.config import Settings, get_settings
 
@@ -34,6 +35,7 @@ def _build_graph(settings: Settings):
         partial(benchmark_discovery_node, settings=settings),
     )
     workflow.add_node("ranking", execute_ranking)
+    workflow.add_node("synthesis", synthesis_node)
 
     # Edges
     workflow.set_entry_point("validator")
@@ -56,6 +58,7 @@ def _build_graph(settings: Settings):
     workflow.add_conditional_edges("validator", check_validity)
     workflow.add_edge(["token_ratio", "refiner"], "benchmark_discovery")
     workflow.add_edge("benchmark_discovery", "ranking")
-    workflow.add_edge("ranking", END)
+    workflow.add_edge("ranking", "synthesis")
+    workflow.add_edge("synthesis", END)
 
     return workflow.compile()
