@@ -65,106 +65,100 @@ def _normalize_scores_to_0_1(scores: List[float]) -> List[float]:
     return [(score - min_score) / (max_score - min_score) for score in scores]
 
 
-def _apply_bridge_model_calibration(
-    session: Session, model_id: int, benchmark_id: int, variant: str
-) -> Tuple[Optional[float], Optional[str]]:
+def _precompute_bridge_calibration(
+    session: Session,
+    benchmark_ids: List[int],
+) -> Tuple[Dict[int, Optional[Tuple[float, str]]], Dict[int, "BenchmarkDictionary"]]:
     """
-    Apply bridge model offset logic for score estimation.
+    Pre-compute bridge model offsets once per benchmark_id.
 
-    If Model X lacks data for Variant A but has data for Variant B,
-    use "Bridge Models" (models with both A and B scores) to calculate offset.
+    If models lack data for Variant A but have data for Variant B,
+    use "Bridge Models" (models with both A and B scores) to calculate a median offset.
+
+    Returns:
+        - {benchmark_id: (median_offset, bridge_model_name)} or {benchmark_id: None}
+        - {benchmark_id: BenchmarkDictionary ORM object}
     """
-    # Get all models that have scores for both variants of the same benchmark
-    bridge_models = (
-        session.query(BenchmarkScore.model_id)
+    benchmark_orm = {
+        b.id: b
+        for b in session.query(BenchmarkDictionary)
+        .filter(BenchmarkDictionary.id.in_(benchmark_ids))
+        .all()
+    }
+    benchmark_names = list({b.name_normalized for b in benchmark_orm.values()})
+
+    # Find all models that have scores for ≥2 distinct variants of each benchmark name.
+    bridge_model_rows = (
+        session.query(BenchmarkScore.model_id, BenchmarkDictionary.name_normalized)
         .join(BenchmarkDictionary)
-        .filter(
-            BenchmarkDictionary.name_normalized
-            == (
-                session.query(BenchmarkDictionary.name_normalized)
-                .filter(BenchmarkDictionary.id == benchmark_id)
-                .scalar()
-            )
-        )
-        .group_by(BenchmarkScore.model_id)
+        .filter(BenchmarkDictionary.name_normalized.in_(benchmark_names))
+        .group_by(BenchmarkScore.model_id, BenchmarkDictionary.name_normalized)
         .having(func.count(func.distinct(BenchmarkDictionary.variant)) >= 2)
         .all()
     )
 
-    if not bridge_models:
-        return None, None
+    if not bridge_model_rows:
+        return {bid: None for bid in benchmark_ids}, benchmark_orm
 
-    bridge_model_ids = [model_id for (model_id,) in bridge_models]
+    bridge_ids_by_name: Dict[str, List[int]] = {}
+    all_bridge_model_ids: set = set()
+    for model_id, name_normalized in bridge_model_rows:
+        bridge_ids_by_name.setdefault(name_normalized, []).append(model_id)
+        all_bridge_model_ids.add(model_id)
 
-    # Calculate average offset between variants
-    offsets = []
-    for bridge_model_id in bridge_model_ids:
-        # Get scores for both variants of the same benchmark for this bridge model
-        bridge_scores = (
-            session.query(BenchmarkScore.score_value, BenchmarkDictionary.variant)
-            .join(BenchmarkDictionary)
-            .filter(
-                and_(
-                    BenchmarkScore.model_id == bridge_model_id,
-                    BenchmarkDictionary.name_normalized
-                    == (
-                        session.query(BenchmarkDictionary.name_normalized)
-                        .filter(BenchmarkDictionary.id == benchmark_id)
-                        .scalar()
-                    ),
-                )
-            )
-            .all()
+    # Bulk fetch scores for all bridge models × benchmark names.
+    bridge_score_rows = (
+        session.query(
+            BenchmarkScore.model_id,
+            BenchmarkScore.score_value,
+            BenchmarkDictionary.variant,
+            BenchmarkDictionary.name_normalized,
         )
-
-        if len(bridge_scores) == 2:
-            score_dict = {variant: score for score, variant in bridge_scores}
-            variants = list(score_dict.keys())
-            if variant in variants:
-                # Find the other variant
-                other_variant = [v for v in variants if v != variant][0]
-                offset = score_dict[variant] - score_dict[other_variant]
-                offsets.append(offset)
-
-    if not offsets:
-        return None, None
-
-    # Use median offset for robustness
-    median_offset = np.median(offsets)
-
-    # Get the model's score for the other variant
-    other_variant_scores = (
-        session.query(BenchmarkScore.score_value)
         .join(BenchmarkDictionary)
         .filter(
             and_(
-                BenchmarkScore.model_id == model_id,
-                BenchmarkDictionary.name_normalized
-                == (
-                    session.query(BenchmarkDictionary.name_normalized)
-                    .filter(BenchmarkDictionary.id == benchmark_id)
-                    .scalar()
-                ),
-                BenchmarkDictionary.variant != variant,
+                BenchmarkScore.model_id.in_(all_bridge_model_ids),
+                BenchmarkDictionary.name_normalized.in_(benchmark_names),
             )
         )
         .all()
     )
 
-    if not other_variant_scores:
-        return None, None
+    # Group as (name_normalized, model_id) → {variant: score_value}
+    bridge_scores_by_name_model: Dict[Tuple[str, int], Dict[str, float]] = {}
+    for model_id, score_value, variant, name_normalized in bridge_score_rows:
+        bridge_scores_by_name_model.setdefault((name_normalized, model_id), {})[
+            variant
+        ] = score_value
 
-    # Take the most recent score for the other variant
-    other_score = max(other_variant_scores, key=lambda x: x[0])[0]
-    estimated_score = other_score - median_offset
+    # Fetch bridge model names (for estimation_note).
+    bridge_model_names = {
+        model_id: name
+        for model_id, name in session.query(LLMMetadata.id, LLMMetadata.name_normalized)
+        .filter(LLMMetadata.id.in_(all_bridge_model_ids))
+        .all()
+    }
 
-    bridge_model_name = (
-        session.query(LLMMetadata.name_normalized)
-        .filter(LLMMetadata.id == bridge_model_ids[0])
-        .scalar()
-    )
+    # Compute median offset per benchmark_id.
+    result: Dict[int, Optional[Tuple[float, str]]] = {}
+    for bid in benchmark_ids:
+        bm = benchmark_orm[bid]
+        bridge_ids_for_name = bridge_ids_by_name.get(bm.name_normalized, [])
 
-    return estimated_score, f"Inferred via bridge model '{bridge_model_name}'"
+        offsets = []
+        for bridge_model_id in bridge_ids_for_name:
+            scores = bridge_scores_by_name_model.get((bm.name_normalized, bridge_model_id), {})
+            if len(scores) == 2 and bm.variant in scores:
+                other_variant = next(v for v in scores if v != bm.variant)
+                offsets.append(scores[bm.variant] - scores[other_variant])
+
+        if not offsets:
+            result[bid] = None
+        else:
+            first_bridge_name = bridge_model_names.get(bridge_ids_for_name[0], "unknown")
+            result[bid] = (float(np.median(offsets)), first_bridge_name)
+
+    return result, benchmark_orm
 
 
 def retrieve_and_rank_models(
@@ -240,6 +234,59 @@ def retrieve_and_rank_models(
     benchmark_ids = [bw["id"] for bw in benchmark_weights]
     model_results = []
 
+    model_ids = [m.id for m in filtered_models]
+
+    # Bulk fetch all scores for relevant (model, benchmark) pairs, most recent first.
+    all_score_rows = (
+        session.query(BenchmarkScore, BenchmarkDictionary)
+        .join(BenchmarkDictionary)
+        .filter(
+            and_(
+                BenchmarkScore.model_id.in_(model_ids),
+                BenchmarkScore.benchmark_id.in_(benchmark_ids),
+            )
+        )
+        .order_by(BenchmarkScore.date_published.desc().nullslast())
+        .all()
+    )
+    # Keep only the most recent score per (model_id, benchmark_id).
+    # TODO: Alternative heuristic for most reliable score
+    scores_by_model_benchmark: Dict[Tuple[int, int], Tuple] = {}
+    for score, benchmark in all_score_rows:
+        key = (score.model_id, score.benchmark_id)
+        if key not in scores_by_model_benchmark:
+            scores_by_model_benchmark[key] = (score, benchmark)
+
+    # Pre-compute bridge model calibration data once per benchmark (not once per model).
+    # Also returns benchmark_orm: {id: BenchmarkDictionary} fetched from DB.
+    bridge_calibration, benchmark_orm = _precompute_bridge_calibration(session, benchmark_ids)
+
+    # Bulk fetch "other variant" scores for all models × benchmark names
+    # (variants NOT matching the target benchmark_id but sharing the same name_normalized).
+    benchmark_names = [b.name_normalized for b in benchmark_orm.values()]
+    other_variant_rows = (
+        session.query(
+            BenchmarkScore.model_id,
+            BenchmarkScore.score_value,
+            BenchmarkDictionary.name_normalized,
+        )
+        .join(BenchmarkDictionary)
+        .filter(
+            and_(
+                BenchmarkScore.model_id.in_(model_ids),
+                BenchmarkDictionary.name_normalized.in_(benchmark_names),
+                BenchmarkDictionary.id.notin_(benchmark_ids),
+            )
+        )
+        .all()
+    )
+    # Keep max score per (model_id, name_normalized) — matches original semantics.
+    other_variant_scores: Dict[Tuple[int, str], float] = {}
+    for model_id, score_value, name_normalized in other_variant_rows:
+        key = (model_id, name_normalized)
+        if key not in other_variant_scores or score_value > other_variant_scores[key]:
+            other_variant_scores[key] = score_value
+
     for model in filtered_models:
         benchmark_results = []
         performance_scores = []
@@ -248,19 +295,8 @@ def retrieve_and_rank_models(
             benchmark_id = bw["id"]
             weight = bw["weight"]
 
-            # Try to get actual score
-            score_record = (
-                session.query(BenchmarkScore, BenchmarkDictionary)
-                .join(BenchmarkDictionary)
-                .filter(
-                    and_(
-                        BenchmarkScore.model_id == model.id,
-                        BenchmarkScore.benchmark_id == benchmark_id,
-                    )
-                )
-                .order_by(BenchmarkScore.date_published.desc().nullslast())
-                .first()
-            )
+            # Dict lookup — replaces per-(model, benchmark) DB query
+            score_record = scores_by_model_benchmark.get((model.id, benchmark_id))
 
             if score_record:
                 score, benchmark = score_record
@@ -279,34 +315,30 @@ def retrieve_and_rank_models(
                 performance_scores.append(score.score_value * weight)
             else:
                 # Try bridge model calibration
-                benchmark = (
-                    session.query(BenchmarkDictionary)
-                    .filter(BenchmarkDictionary.id == benchmark_id)
-                    .first()
-                )
-
-                if benchmark:
-                    estimated_score, estimation_note = _apply_bridge_model_calibration(
-                        session, model.id, benchmark_id, benchmark.variant
-                    )
-
-                    if estimated_score is not None:
+                calib = bridge_calibration.get(benchmark_id)
+                if calib is not None:
+                    median_offset, bridge_model_name = calib
+                    bm = benchmark_orm[benchmark_id]
+                    other_score = other_variant_scores.get((model.id, bm.name_normalized))
+                    if other_score is not None:
+                        estimated_score = other_score - median_offset
                         benchmark_results.append(
                             {
-                                "benchmark_id": benchmark.id,
-                                "benchmark_name": benchmark.name_normalized,
-                                "benchmark_variant": benchmark.variant,
+                                "benchmark_id": benchmark_id,
+                                "benchmark_name": bm.name_normalized,
+                                "benchmark_variant": bm.variant,
                                 "score": estimated_score,
                                 "metric_unit": "%",  # Default assumption
                                 "weight_used": weight,
                                 "is_estimated": True,
-                                "estimation_note": estimation_note,
+                                "estimation_note": f"Inferred via bridge model '{bridge_model_name}'",
                             }
                         )
                         performance_scores.append(estimated_score * weight)
 
         if benchmark_results:  # Only include models with at least some benchmark data
             # Step 4: Calculate Blended Cost
+            logger.debug(f"include model: {model.name_normalized}")
             blended_cost = _calculate_blended_cost(model, token_ratio_estimation)
 
             model_results.append(

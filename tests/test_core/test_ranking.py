@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from llm_compass.agentic_core.nodes.ranking import (
-    _apply_bridge_model_calibration,
+    _precompute_bridge_calibration,
     _calculate_blended_cost,
     _normalize_scores_to_0_1,
     execute_ranking,
@@ -433,14 +433,8 @@ class TestBridgeModelCalibration:
         m = make_model(db_session, name="target-model")
         make_score(db_session, m, bench, score_value=70.0)
 
-        score, note = _apply_bridge_model_calibration(
-            session=db_session,
-            model_id=m.id,
-            benchmark_id=bench.id,
-            variant="v1",
-        )
-        assert score is None
-        assert note is None
+        result, _ = _precompute_bridge_calibration(db_session, [bench.id])
+        assert result[bench.id] is None
 
     def test_bridge_model_estimate(self, db_session):
         # Two benchmark variants for the same benchmark name
@@ -463,16 +457,16 @@ class TestBridgeModelCalibration:
         target = make_model(db_session, name="target")
         make_score(db_session, target, bench_v2, score_value=75.0)
 
-        # Estimate v1 score for target (it has v2 but not v1)
-        estimated, note = _apply_bridge_model_calibration(
-            session=db_session,
-            model_id=target.id,
-            benchmark_id=bench_v1.id,
-            variant="v1",
-        )
+        # Pre-compute bridge calibration for bench_v1 (target variant = v1)
+        result, _ = _precompute_bridge_calibration(db_session, [bench_v1.id])
+
+        calib = result[bench_v1.id]
+        assert calib is not None
+        median_offset, note = calib
 
         # Code computes: other_score - median_offset = 75 - 10 = 65
-        assert estimated == pytest.approx(65.0)
+        other_score = 75.0  # target's v2 score
+        assert other_score - median_offset == pytest.approx(65.0)
         assert note is not None
         assert "bridge" in note.lower()
 
@@ -492,7 +486,8 @@ class TestExecuteRanking:
             "constraints": {},
             "token_ratio_estimation": _text_only_token_ratio(),
         })
-        result = execute_ranking(state, session=db_session)
+        config = {"configurable": {"session": db_session}}
+        result = execute_ranking(state, config)
 
         assert "ranked_results" in result
         assert "top_performance" in result["ranked_results"]
@@ -503,7 +498,8 @@ class TestExecuteRanking:
             "constraints": {},
             "token_ratio_estimation": _text_only_token_ratio(),
         })
-        result = execute_ranking(state, session=db_session)
+        config = {"configurable": {"session": db_session}}
+        result = execute_ranking(state, config)
 
         assert result["ranked_results"]["top_performance"] == []
         assert result["ranked_results"]["balanced"] == []
