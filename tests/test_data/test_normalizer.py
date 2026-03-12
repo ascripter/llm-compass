@@ -17,68 +17,88 @@ from llm_compass.data.normalizer import normalize
 
 # ── 1. Roundtrip: slug in = slug out ────────────────────────────────────────
 
+
 class TestRoundtrip:
     """Slug-format reference names must produce canonical_id == input."""
 
-    @pytest.mark.parametrize("slug", [
-        "claude-3.5-sonnet",
-        "claude-3.7-sonnet-thinking",
-        "claude-4.5-opus-thinking",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "gpt-5.2",
-        "gpt-5.2-pro",
-        "gpt-5-codex",
-        "o1",
-        "o1-mini",
-        "o3",
-        "o3-mini",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.5-pro",
-        "gemini-3-flash-preview",
-        "deepseek-v3",
-        "deepseek-v3.1",
-        "deepseek-r1",
-        "deepseek-v3.2-exp-thinking",
-        "llama-3.1-70b-instruct",
-        "llama-3.3-70b",
-        "qwen3-235b-a22b-thinking",
-        "qwen3-vl-235b-a22b-thinking",
-        "minimax-m2",
-        "minimax-m2.1",
-        "mimo-v2-flash",
-        "mistral-large-3",
-        "mixtral-8x22b-instruct",
-        "phi-4-mini-reasoning",
-        "grok-4-fast-reasoning",
-        "grok-4-fast-non-reasoning",
-        "sonar-reasoning-pro",
-    ])
+    @pytest.mark.parametrize(
+        "slug",
+        [
+            "claude-3.5-sonnet",
+            "claude-3.7-sonnet-thinking",
+            "claude-4.5-opus-thinking",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5-codex",
+            "o1",
+            "o1-mini",
+            "o3",
+            "o3-mini",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-3-flash-preview",
+            "deepseek-v3",
+            "deepseek-v3.1",
+            "deepseek-r1",
+            "deepseek-v3.2-exp-thinking",
+            "llama-3.1-70b-instruct",
+            "llama-3.3-70b",
+            "qwen3-235b-a22b-thinking",
+            "qwen3-vl-235b-a22b-thinking",
+            "minimax-m2",
+            "minimax-m2.1",
+            "mimo-v2-flash",
+            "mistral-large-3",
+            "mixtral-8x22b-instruct",
+            "phi-4-mini-reasoning",
+            "grok-4-fast-reasoning",
+            "grok-4-fast-non-reasoning",
+            "sonar-reasoning-pro",
+        ],
+    )
     def test_slug_roundtrip(self, slug):
         result = normalize(slug)
-        assert result["canonical_id"] == slug, (
-            f"Expected canonical_id={slug!r}, got {result['canonical_id']!r}"
-        )
+        assert (
+            result["canonical_id"] == slug
+        ), f"Expected canonical_id={slug!r}, got {result['canonical_id']!r}"
 
 
 # ── 2. Human-readable equivalence ───────────────────────────────────────────
 
+
 class TestHumanReadable:
     """Natural language model names should produce correct slugs."""
 
-    @pytest.mark.parametrize("raw, expected_canonical", [
-        ("Claude 3.5 Sonnet", "claude-3.5-sonnet"),
-        ("Gemini 2.5 Flash", "gemini-2.5-flash"),
-        ("Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite"),
-        ("Gemini 2.5 Pro", "gemini-2.5-pro"),
-        ("DeepSeek V3.1", "deepseek-v3.1"),
-        ("DeepSeek V3", "deepseek-v3"),
-        ("mimo V2 Flash", "mimo-v2-flash"),
-        ("MiniMax M2", "minimax-m2"),
-        ("GPT 5.2", "gpt-5.2"),
-        ("GPT-4o Mini", "gpt-4o-mini"),
-    ])
+    @pytest.mark.parametrize(
+        "raw, expected_canonical",
+        [
+            ("Claude 3.5 Sonnet", "claude-3.5-sonnet"),
+            ("Gemini 2.5 Flash", "gemini-2.5-flash"),
+            ("Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite"),
+            ("Gemini 2.5 Flash (Nonthinking)", "gemini-2.5-flash-non-thinking"),
+            ("Gemini 2.5 Pro", "gemini-2.5-pro"),
+            ("DeepSeek V3.1", "deepseek-v3.1"),
+            ("DeepSeek V3", "deepseek-v3"),
+            ("mimo V2 Flash", "mimo-v2-flash"),
+            ("MiniMax M2", "minimax-m2"),
+            ("MagistralMedium 1.2", "magistral-medium-1.2"),
+            ("GPT 5.2", "gpt-5.2"),
+            ("GPT-4o Mini", "gpt-4o-mini"),
+            ("Claude 3.7 Sonnet (20250219)", "claude-3.7-sonnet-20250219"),
+            ("Claude 4.5Haiku", "claude-4.5-haiku"),
+            ("Command R+", "command-r+"),
+            ("Qwen3 MaxThinking", "qwen3-max-thinking"),
+            ("Kimi K2 Instruct 0905", "kimi-k2-instruct-0905"),
+            ("DeepSeek R1(Jan)", "deepseek-r1-jan"),
+            ("DeepSeek VL2 Small", "deepseek-vl2-small"),
+            ("DeepSeekV3.1Terminus", "deepseek-v3.1-terminus"),
+            ("GLM-4.5V", "glm-4.5v"),
+            ("ERNIE 5.0ThinkingPreview", "ernie-5.0-thinking-preview"),
+        ],
+    )
     def test_human_to_slug(self, raw, expected_canonical):
         result = normalize(raw)
         assert result["canonical_id"] == expected_canonical, (
@@ -88,6 +108,7 @@ class TestHumanReadable:
 
 
 # ── 3. Bug regression tests ─────────────────────────────────────────────────
+
 
 class TestBugRegression:
     """Regression tests for the 6 original bugs."""
@@ -111,43 +132,41 @@ class TestBugRegression:
         """Bug 2: 'standard' should never appear in canonical_id or base_id."""
         for raw in ["GPT-5.2", "Claude 3.5 Sonnet", "Gemini 2.5 Flash", "o4-mini"]:
             result = normalize(raw)
-            assert "standard" not in result["canonical_id"], (
-                f"{raw!r}: 'standard' found in canonical_id={result['canonical_id']!r}"
-            )
-            assert "standard" not in result["base_id"], (
-                f"{raw!r}: 'standard' found in base_id={result['base_id']!r}"
-            )
+            assert (
+                "standard" not in result["canonical_id"]
+            ), f"{raw!r}: 'standard' found in canonical_id={result['canonical_id']!r}"
+            assert (
+                "standard" not in result["base_id"]
+            ), f"{raw!r}: 'standard' found in base_id={result['base_id']!r}"
 
     def test_v_preserved_in_mimo(self):
         """Bug 3: 'V' should be preserved in 'mimo V2 Flash'."""
         result = normalize("mimo V2 Flash")
-        assert "v2" in result["canonical_id"], (
-            f"'v2' not found in canonical_id={result['canonical_id']!r}"
-        )
+        assert (
+            "v2" in result["canonical_id"]
+        ), f"'v2' not found in canonical_id={result['canonical_id']!r}"
 
     def test_v_preserved_in_deepseek(self):
         """Bug 3: 'V' should be preserved in 'DeepSeekV3.1'."""
         result = normalize("DeepSeekV3.1")
-        assert "v3.1" in result["canonical_id"], (
-            f"'v3.1' not found in canonical_id={result['canonical_id']!r}"
-        )
+        assert (
+            "v3.1" in result["canonical_id"]
+        ), f"'v3.1' not found in canonical_id={result['canonical_id']!r}"
 
     def test_lite_preserved(self):
         """Bug 4: 'Lite' should be preserved in 'Gemini 2.5 Flash Lite'."""
         result = normalize("Gemini 2.5 Flash Lite")
-        assert "lite" in result["canonical_id"], (
-            f"'lite' not found in canonical_id={result['canonical_id']!r}"
-        )
+        assert (
+            "lite" in result["canonical_id"]
+        ), f"'lite' not found in canonical_id={result['canonical_id']!r}"
 
     def test_minimax_not_split(self):
         """Bug 5: MiniMax should not be split by size regex."""
         result = normalize("MiniMax M1 80k")
-        assert result["canonical_id"].startswith("minimax"), (
-            f"Expected canonical_id to start with 'minimax', got {result['canonical_id']!r}"
-        )
-        assert "mini" != result.get("size"), (
-            f"'mini' should not be detected as size"
-        )
+        assert result["canonical_id"].startswith(
+            "minimax"
+        ), f"Expected canonical_id to start with 'minimax', got {result['canonical_id']!r}"
+        assert "mini" != result.get("size"), f"'mini' should not be detected as size"
 
     def test_minimax_case_consistency(self):
         """Bug 6: Minimax-M2, Minimax-m2, MiniMax M2 should all be same."""
@@ -161,6 +180,7 @@ class TestBugRegression:
 
 
 # ── 4. Variant handling ─────────────────────────────────────────────────────
+
 
 class TestVariant:
     """Variant detection and ID construction."""
@@ -210,8 +230,37 @@ class TestVariant:
         assert result["variant"] == ""
         assert result["provider"] == "openai"
 
+    @pytest.mark.parametrize(
+        "raw, expected_variant",
+        [
+            ("Claude 3.5 Sonnet", ""),
+            ("Gemini 2.5 Flash", ""),
+            ("Gemini 2.5 Flash Lite", ""),
+            ("Gemini 2.5 Flash (Nonthinking)", "non-thinking"),
+            ("Gemini 2.5 Pro", ""),
+            ("DeepSeek V3.1", ""),
+            ("DeepSeek V3", ""),
+            ("mimo V2 Flash", ""),
+            ("MiniMax M2", ""),
+            ("MagistralMedium 1.2,", ""),
+            ("GPT 5.2", ""),
+            ("GPT-4o Mini", ""),
+            ("Claude 3.7 Sonnet (20250219)", ""),
+            ("Qwen3 MaxThinking", "thinking"),
+            ("Kimi K2 Instruct 0905", "instruct"),
+            ("ERNIE 5.0ThinkingPreview", "thinking"),
+        ],
+    )
+    def test_variant(self, raw, expected_variant):
+        result = normalize(raw)
+        assert result["variant"] == expected_variant, (
+            f"normalize({raw!r}): expected variant={expected_variant!r}, "
+            f"got {result['variant']!r}"
+        )
+
 
 # ── 5. Inference / reasoning effort ─────────────────────────────────────────
+
 
 class TestReasoningEffort:
     """Reasoning effort level extraction."""
@@ -250,8 +299,36 @@ class TestReasoningEffort:
         result = normalize("GPT-5.2 (High Reasoning)")
         assert result["canonical_id"] == "gpt-5.2-reasoning"
 
+    @pytest.mark.parametrize(
+        "raw, expected_reasoning_effort",
+        [
+            ("Claude 3.5 Sonnet", None),
+            ("Gemini 2.5 Flash", None),
+            ("Gemini 2.5 Flash Lite", None),
+            ("Gemini 2.5 Flash (Nonthinking)", None),
+            ("GPT-4o Mini", None),
+            ("GPT-5.2Codex(xhigh)", "xhigh"),
+            ("GPT-5 (low)", "low"),
+            ("o4-mini(high)", "high"),
+            ("Minimax M2.1", None),
+            ("MagistralMedium 1.2,", None),
+            ("Claude 3.7 Sonnet (20250219)", None),
+            ("GPT-5 nano (2025-08-07) (high reasoning)", "high"),
+            ("Qwen3 MaxThinking", None),
+            ("Kimi K2 Instruct 0905", None),
+            ("ERNIE 5.0ThinkingPreview", None),
+        ],
+    )
+    def test_reasoning_effort(self, raw, expected_reasoning_effort):
+        result = normalize(raw)
+        assert result["reasoning_effort"] == expected_reasoning_effort, (
+            f"normalize({raw!r}): expected reasoning_effort={expected_reasoning_effort!r}, "
+            f"got {result['reasoning_effort']!r}"
+        )
+
 
 # ── 6. Field extraction ─────────────────────────────────────────────────────
+
 
 class TestFieldExtraction:
     """Verify individual field extraction."""
@@ -309,9 +386,21 @@ class TestFieldExtraction:
         result = normalize("deepseek-v3.1")
         assert result["version"] == "v3.1"
 
-    def test_date_extraction(self):
-        result = normalize("claude-3-5-sonnet-20241022")
-        assert result["date"] is not None
+    @pytest.mark.parametrize(
+        "raw, expected_date",
+        [
+            ("Claude 3.5 Sonnet 20241022", "20241022"),
+            ("claude-3-5-sonnet-20241022", "20241022"),
+            ("Gemini 2.5 Flash", None),
+            ("Kimi K2 Instruct 0905", "0905"),
+            ("DeepSeek R1(Jan)", "jan"),
+        ],
+    )
+    def test_date_extraction(self, raw, expected_date):
+        result = normalize(raw)
+        assert result["date"] == expected_date, (
+            f"normalize({raw!r}): expected date={expected_date!r}, " f"got {result['date']!r}"
+        )
 
     def test_empty_input(self):
         result = normalize("")
