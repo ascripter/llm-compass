@@ -9,6 +9,7 @@ from sqlalchemy import insert, delete
 from .database import Database
 from .embedding import Embedding
 from .models import BenchmarkDictionary, LLMMetadata, BenchmarkScore, ModelNormalized, ModelNormalizedSchema
+from .matcher import ModelMatcher
 from .normalizer import Normalizer, normalize
 
 
@@ -127,14 +128,21 @@ def ingest_benchmark_scores(
     model_names = [r["original_model_name"] for r in records]
     model_norm = normalizer.normalize_model_names(model_names)
 
-    # For FK resolution create lookup tables by unique-constraints
+    # For FK resolution: benchmark lookup by name+variant, model lookup via matcher
     fk_lookup_benchmark = {
         f"{_.name_normalized}#{_.variant if _.variant else ''}": _
         for _ in database.SessionLocal().query(BenchmarkDictionary).all()
     }
-    fk_lookup_llm = {
-        f"{_.name_normalized}": _ for _ in database.SessionLocal().query(LLMMetadata).all()
-    }
+
+    all_models = database.SessionLocal().query(LLMMetadata).all()
+    matcher = ModelMatcher()
+    matcher.build_index([
+        {"id": m.id, "name_normalized": m.name_normalized,
+         "name_aliases": m.name_aliases}
+        for m in all_models
+    ])
+
+    unresolved_models: list[str] = []
 
     _z = zip(records, bench_norm, model_norm)
     for row, (bench_name_norm, bench_variant_norm), model_name_norm in _z:
@@ -154,11 +162,26 @@ def ingest_benchmark_scores(
             )
         row["benchmark_id"] = benchmark_fk.id
 
-        # LLMMetadata: We use normalized names for FK resolution in existing tables
-        model_fk = fk_lookup_llm.get(f"{model_name_norm}")
-        if not model_fk:
-            raise ValueError(f"Could not find model FK for {model_name_norm}")
-        row["model_id"] = model_fk.id
+        # LLMMetadata: Use cascade matcher on the original raw name
+        model_id = matcher.resolve(row["original_model_name"])
+        if model_id is None:
+            unresolved_models.append(row["original_model_name"])
+            continue
+        row["model_id"] = model_id
+
+    if unresolved_models:
+        unique = sorted(set(unresolved_models))
+        print(f"[WARNING] {len(unique)} unresolved model names:")
+        for name in unique:
+            candidates = matcher.match(name)
+            detail = (
+                f"  ambiguous: {[c.name_normalized for c in candidates]}"
+                if candidates else "  no candidates"
+            )
+            print(f"  - {name!r} {detail}")
+
+    # Filter out rows without model_id (unresolved)
+    records = [r for r in records if "model_id" in r and r["model_id"]]
 
     with database.SessionLocal() as session:
         if update:
