@@ -322,8 +322,12 @@ class ModelNormalized(Base):
     size: Mapped[Optional[str]] = col(String, nullable=True)
 
     # Normalised variant label
-    # One of: standard | thinking | reasoning | instruct | preview | codex
-    variant: Mapped[str] = col(String, nullable=False, default="standard")
+    # One of: "" | thinking | reasoning | instruct | preview | codex | non-thinking | non-reasoning | ...
+    variant: Mapped[str] = col(String, nullable=False, default="")
+
+    # Reasoning effort level extracted from inference config annotations
+    # One of: "xhigh" | "high" | "medium" | "low" | None
+    reasoning_effort: Mapped[Optional[str]] = col(String, nullable=True, default=None)
 
     # ISO-8601 date string extracted from the raw name, or None
     # e.g. "2025-02" | "2025-02-24" | None
@@ -350,7 +354,8 @@ class ModelNormalizedSchema(BaseModel):
     family: str
     version: Optional[str] = None
     size: Optional[str] = None
-    variant: str = "standard"
+    variant: str = ""
+    reasoning_effort: Optional[str] = None
     date: Optional[str] = None
     is_latest_alias: bool = False
 

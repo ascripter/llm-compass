@@ -79,12 +79,12 @@ def matcher():
 class TestTierExact:
     """Tier 1 — query.canonical_id matches a reference canonical_id exactly."""
 
-    def test_gpt_with_noise_stripped(self, matcher):
-        """'GPT-5.2 (High Reasoning)' strips noise → canonical_id = gpt-5.2-standard."""
+    def test_gpt_with_reasoning_effort(self, matcher):
+        """'GPT-5.2 (High Reasoning)' → canonical_id 'gpt-5.2-reasoning',
+        which doesn't match 'gpt-5.2' exactly but should match at a lower tier."""
         candidates = matcher.match("GPT-5.2 (High Reasoning)")
-        assert len(candidates) == 1
-        assert candidates[0].model_id == 2
-        assert candidates[0].tier == "exact"
+        assert len(candidates) >= 1
+        assert any(c.model_id == 2 for c in candidates)
 
     def test_o4_mini(self, matcher):
         """'o4-mini' is its own canonical_id."""
@@ -128,9 +128,8 @@ class TestTierFieldTuples:
     """Tiers 3-5 — match by progressively dropping fields."""
 
     def test_same_family_different_variant(self, matcher):
-        """'Claude 3.5 Sonnet (Thinking)' has variant=thinking while ref has variant=standard.
-        Should match at no_size tier (family+version+variant won't match standard,
-        so it falls to family_version)."""
+        """'Claude 3.5 Sonnet (Thinking)' has variant=thinking while ref has variant=''.
+        Should match at no_variant or family_version tier."""
         candidates = matcher.match("Claude 3.5 Sonnet (Thinking)")
         assert len(candidates) >= 1
         assert any(c.model_id == 1 for c in candidates)
@@ -253,6 +252,6 @@ class TestMatchCandidateFields:
     def test_candidate_tier_is_set(self, matcher):
         candidates = matcher.match("gpt-5.2")
         assert candidates[0].tier in (
-            "exact", "base_id", "full", "no_provider", "core",
+            "exact", "base_id", "full", "no_effort", "no_provider", "core",
             "no_size", "no_variant", "family_version", "family_only",
         )

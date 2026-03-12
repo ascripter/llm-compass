@@ -40,7 +40,8 @@ from .normalizer import normalize
 MATCH_CASCADE: list[tuple[str, tuple[str, ...]]] = [
     ("exact",          ("canonical_id",)),
     ("base_id",        ("base_id",)),
-    ("full",           ("provider", "family", "version", "size", "variant", "date")),
+    ("full",           ("provider", "family", "version", "size", "variant", "reasoning_effort", "date")),
+    ("no_effort",      ("provider", "family", "version", "size", "variant", "date")),
     ("no_provider",    ("family", "version", "size", "variant", "date")),
     ("core",           ("family", "version", "size", "variant")),
     ("no_size",        ("family", "version", "variant")),
