@@ -51,18 +51,58 @@ REFERENCE_MODELS = [
     },
     {
         "id": 8,
+        "name_normalized": "llama-3.1-70b",
+        "name_aliases": ["meta-llama-3.1-70b", "llama3-70b"],
+    },
+    {
+        "id": 9,
+        "name_normalized": "gpt-4.1-high",
+        "name_aliases": ["gpt-4.1-2025-04-14-high"],
+    },
+    {
+        "id": 10,
         "name_normalized": "gpt-4.1",
         "name_aliases": ["gpt-4.1-2025-04-14"],
     },
     {
-        "id": 9,
+        "id": 11,
         "name_normalized": "claude-3.5-haiku",
         "name_aliases": ["claude-3-5-haiku-20241022"],
     },
     {
-        "id": 10,
+        "id": 12,
         "name_normalized": "gemini-2.5-pro",
         "name_aliases": [],
+    },
+    {
+        "id": 13,
+        "name_normalized": "command-r-plus",
+        "name_aliases": ["command-r+"],
+    },
+    {
+        "id": 14,
+        "name_normalized": "minimax-m2.5",
+        "name_aliases": [],
+    },
+    {
+        "id": 15,
+        "name_normalized": "gpt-5.1-codex",
+        "name_aliases": [],
+    },
+    {
+        "id": 16,
+        "name_normalized": "gpt-5.1-codex-max",
+        "name_aliases": [],
+    },
+    {
+        "id": 17,
+        "name_normalized": "deepseek-v3-0324",
+        "name_aliases": [],
+    },
+    {
+        "id": 18,
+        "name_normalized": "kimi-k2-0905",
+        "name_aliases": ["kimi-k2-instruct-0905"],
     },
 ]
 
@@ -75,6 +115,7 @@ def matcher():
 
 
 # ── Tier 1: Exact canonical_id match ─────────────────────────────────────────
+
 
 class TestTierExact:
     """Tier 1 — query.canonical_id matches a reference canonical_id exactly."""
@@ -110,6 +151,7 @@ class TestTierExact:
 
 # ── Tier 2: base_id match ────────────────────────────────────────────────────
 
+
 class TestTierBaseId:
     """Tier 2 — base_id matches (date stripped)."""
 
@@ -118,11 +160,12 @@ class TestTierBaseId:
         # The alias is already indexed so it should match at exact level
         # Let's test a date variant that isn't in the alias list
         candidates = matcher.match("gpt-4.1-2025-04-14")
-        assert any(c.model_id == 8 for c in candidates)
+        assert any(c.model_id == 10 for c in candidates)
         assert candidates[0].tier in ("exact", "base_id")
 
 
 # ── Tier 3-5: Field-tuple matches ────────────────────────────────────────────
+
 
 class TestTierFieldTuples:
     """Tiers 3-5 — match by progressively dropping fields."""
@@ -151,6 +194,7 @@ class TestTierFieldTuples:
 
 # ── Tier 8-9: Family-version and family-only ──────────────────────────────────
 
+
 class TestTierFamilyLevel:
     """Tiers 8-9 — coarse matching by family and/or version."""
 
@@ -158,10 +202,11 @@ class TestTierFamilyLevel:
         """Query with same family and version but different variant/size."""
         candidates = matcher.match("Gemini 2.5 Pro")
         assert len(candidates) >= 1
-        assert any(c.model_id == 10 for c in candidates)
+        assert any(c.model_id == 12 for c in candidates)
 
 
 # ── No match ──────────────────────────────────────────────────────────────────
+
 
 class TestNoMatch:
     """Queries that shouldn't match anything in the reference set."""
@@ -178,6 +223,7 @@ class TestNoMatch:
 
 
 # ── Ambiguity ─────────────────────────────────────────────────────────────────
+
 
 class TestAmbiguity:
     """Multiple distinct model_ids at the same cascade level."""
@@ -202,6 +248,7 @@ class TestAmbiguity:
 
 # ── resolve() ─────────────────────────────────────────────────────────────────
 
+
 class TestResolve:
     """Test the convenience resolve() method."""
 
@@ -224,6 +271,7 @@ class TestResolve:
 
 # ── resolve_batch() ───────────────────────────────────────────────────────────
 
+
 class TestResolveBatch:
     """Test batch resolution."""
 
@@ -236,6 +284,7 @@ class TestResolveBatch:
 
 
 # ── MatchCandidate fields ────────────────────────────────────────────────────
+
 
 class TestMatchCandidateFields:
     """Verify MatchCandidate has correct metadata."""
@@ -252,6 +301,14 @@ class TestMatchCandidateFields:
     def test_candidate_tier_is_set(self, matcher):
         candidates = matcher.match("gpt-5.2")
         assert candidates[0].tier in (
-            "exact", "base_id", "full", "no_effort", "no_provider", "core",
-            "no_size", "no_variant", "family_version", "family_only",
+            "exact",
+            "base_id",
+            "full",
+            "no_effort",
+            "no_provider",
+            "core",
+            "no_size",
+            "no_variant",
+            "family_version",
+            "family_only",
         )
