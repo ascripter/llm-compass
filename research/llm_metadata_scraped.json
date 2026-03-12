@@ -1086,7 +1086,7 @@
     },
     {
         "name_normalized": "command-r-plus",
-        "name_aliases": "",
+        "name_aliases": "command-r+",
         "model_type": "instruct",
         "provider": "Cohere",
         "release_date": "2024-04-04",
