@@ -134,7 +134,9 @@ def _split_camel(s: str) -> str:
 _SAMPLING_RE = re.compile(r"\(T\s*=\s*[\d.]+\)|\bT\s*=\s*[\d.]+\b", re.I)
 
 # Inference-level qualifiers: (high reasoning), (low reasoning), (xhigh reasoning), etc.
-_INFERENCE_RE = re.compile(r"\(\s*(xhigh|high|medium|low|default)\s+(reasoning)\s*\)", re.I)
+_INFERENCE_RE = re.compile(
+    r"\(\s*(max|xhigh|high|medium|low|default|adaptive)\s+(reasoning)\s*\)", re.I
+)
 
 # Standalone reasoning in parens: (reasoning)
 _REASONING_PAREN_RE = re.compile(r"\(\s*reasoning\s*\)", re.I)
@@ -150,9 +152,7 @@ _PAREN_VARIANT_RE = re.compile(
 _DATE_PAREN_RE = re.compile(r"\(\s*(\d{4}-\d{2}-\d{2}|\d{8}|\d{4}-\d{2}|\d{1,2}/\d{2,4})\s*\)")
 
 # Month abbreviation in parentheses: (Jan), (Feb), etc.
-_MONTH_PAREN_RE = re.compile(
-    r"\(\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\)", re.I
-)
+_MONTH_PAREN_RE = re.compile(r"\(\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\)", re.I)
 
 
 def _preprocess(raw: str) -> str:
@@ -213,7 +213,7 @@ def _extract_parenthesized(s: str) -> tuple[str, str, Optional[str], Optional[st
 
     # 4c. Extract standalone reasoning effort: (xhigh), (high), (low), etc.
     if reasoning_effort is None:
-        m = re.search(r"\(\s*(xhigh|high|medium|low|adaptive)\s*\)", s, re.I)
+        m = re.search(r"\(\s*(max|xhigh|high|medium|low|adaptive)\s*\)", s, re.I)
         if m:
             reasoning_effort = m.group(1).lower()
             s = s[: m.start()] + " " + s[m.end() :]
@@ -424,9 +424,11 @@ _DATE_PATTERNS = [
     # Trailing MMDD: 0905 (month 01-12, day 01-31) — preserve as-is
     (
         re.compile(r"(?:^|[\s\-_])(\d{4})$"),
-        lambda m: m.group(1)
-        if 1 <= int(m.group(1)[:2]) <= 12 and 1 <= int(m.group(1)[2:]) <= 31
-        else None,
+        lambda m: (
+            m.group(1)
+            if 1 <= int(m.group(1)[:2]) <= 12 and 1 <= int(m.group(1)[2:]) <= 31
+            else None
+        ),
     ),
 ]
 
