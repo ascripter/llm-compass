@@ -312,3 +312,114 @@ class TestMatchCandidateFields:
             "family_version",
             "family_only",
         )
+
+
+# ── Parametrized: Single match cases ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "query,expected_id",
+    [
+        # Claude 3.5 Sonnet (id=1)
+        ("Claude 3.5 Sonnet (20241022)", 1),
+        ("Claude Sonnet 3.5", 1),
+        ("Claude 3.5 Sonnet (latest)", 1),
+        ("claude-3-5-sonnet-20241022", 1),
+        ("claude-3.5-sonnet", 1),
+        # GPT 5.2 (id=2)
+        ("gpt-5.2", 2),
+        ("GPT-5.2", 2),
+        ("gpt-5.2-2025-12-11", 2),
+        ("GPT 5.2", 2),
+        # o4-mini (id=3)
+        ("o4-mini", 3),
+        ("O4-Mini", 3),
+        # Gemini 2.5 Flash (id=5)
+        ("Gemini 2.5 Flash", 5),
+        ("gemini-2.5-flash", 5),
+        ("gemini-2.5-flash-001", 5),
+        # DeepSeek V3 (id=6)
+        ("DeepSeek Chat", 6),
+        ("DeepSeek V3", 6),
+        ("deepseek-v3", 6),
+        ("deepseek-chat", 6),
+        # Llama 3.1 70B instruct (id=7)
+        ("Llama 3.1 70B instruct", 7),
+        ("llama-3.1-70b-instruct", 7),
+        ("meta-llama-3.1-70b-instruct", 7),
+        ("llama3-70b-instruct", 7),
+        # Llama 3.1 70B (id=8)
+        ("Llama 3.1 70B", 8),
+        ("llama-3.1-70b", 8),
+        ("meta-llama-3.1-70b", 8),
+        ("llama3-70b", 8),
+        # GPT 4.1 (high) (id=9)
+        ("gpt-4.1-high", 9),
+        ("gpt-4.1-2025-04-14-high", 9),
+        # Chat GPT 4.1 (id=10)
+        ("Chat GPT 4.1", 10),
+        ("GPT 4.1 (2025-04-14)", 10),
+        ("gpt-4.1", 10),
+        ("gpt-4.1-2025-04-14", 10),
+        # Claude 3.5 Haiku (id=11)
+        ("claude-3.5-haiku", 11),
+        ("Claude 3.5 Haiku", 11),
+        ("claude-3-5-haiku-20241022", 11),
+        # Gemini 2.5 Pro (id=12)
+        ("gemini-2.5-pro", 12),
+        ("Gemini 2.5 Pro", 12),
+        # Command R+ (id=13)
+        ("Command R+", 13),
+        ("command-r-plus", 13),
+        ("command-r+", 13),
+        # MiniMax M2.5 (id=14)
+        ("MiniMax-M2.5", 14),
+        ("minimax-m2.5", 14),
+        # GPT 5.1 Codex (id=15)
+        ("GPT 5.1 Codex", 15),
+        ("gpt-5.1-codex", 15),
+        # GPT 5.1 Codex (max) (id=16)
+        ("gpt-5.1-codex-max", 16),
+        # DeepSeek V3 (0324) (id=17)
+        ("DeepSeek V3 0324", 17),
+        ("deepseek-v3-0324", 17),
+        # Kimi K2 (id=18)
+        ("Kimi K2", 18),
+        ("Kimi K2 (0905)", 18),
+        ("kimi-k2-0905", 18),
+        ("kimi-k2-instruct-0905", 18),
+    ],
+)
+def test_single_match(matcher, query, expected_id):
+    """Each query should match exactly one model with the given id."""
+    candidates = matcher.match(query)
+    assert (
+        len(candidates) == 1
+    ), f"Expected 1 match for {query!r}, got {len(candidates)}: {candidates}"
+    assert (
+        candidates[0].model_id == expected_id
+    ), f"Expected model_id={expected_id} for {query!r}, got {candidates[0].model_id}"
+
+
+# ── Parametrized: Zero match cases ────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Claude 3.7 Sonnet",  # version 3.7 not in refs
+        "DeepSeek V2",  # version 2 not in refs
+        "Gemini 2.5",  # bare, no subfamily flash/pro
+        "Minimax M2",  # version 2 not in refs (ref is m2.5)
+        "GPT5.1 Codex (low)",  # variant=low not in refs
+        "Kimi K2.5",  # version 2.5 not in refs
+        "Falcon 180B",  # unknown family
+        "",  # empty string
+    ],
+)
+def test_zero_matches(matcher, query):
+    """These queries should not match any model."""
+    candidates = matcher.match(query)
+    assert (
+        candidates == []
+    ), f"Expected 0 matches for {query!r}, got {len(candidates)}: {candidates}"
