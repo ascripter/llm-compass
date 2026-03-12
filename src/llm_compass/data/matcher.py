@@ -38,16 +38,17 @@ from .normalizer import normalize
 # Levels are tried top-to-bottom; first hit wins.
 
 MATCH_CASCADE: list[tuple[str, tuple[str, ...]]] = [
-    ("exact",          ("canonical_id",)),
-    ("base_id",        ("base_id",)),
-    ("full",           ("provider", "family", "version", "size", "variant", "reasoning_effort", "date")),
-    ("no_effort",      ("provider", "family", "version", "size", "variant", "date")),
-    ("no_provider",    ("family", "version", "size", "variant", "date")),
-    ("core",           ("family", "version", "size", "variant")),
-    ("no_size",        ("family", "version", "variant")),
-    ("no_variant",     ("family", "version", "date")),
+    ("exact", ("canonical_id",)),
+    ("base_id", ("base_id",)),
+    ("full", ("provider", "family", "version", "size", "variant", "reasoning_effort", "date")),
+    ("full_no_effort", ("provider", "family", "version", "size", "variant", "date")),
+    ("full_no_provider", ("family", "version", "size", "variant", "reasoning_effort", "date")),
+    ("core+date", ("family", "version", "size", "variant", "date")),
+    ("core+effort", ("family", "version", "size", "variant", "reasoning_effort")),
+    ("core", ("family", "version", "size", "variant")),
+    ("no_size", ("family", "version", "variant")),
+    ("no_variant", ("family", "version", "date")),
     ("family_version", ("family", "version")),
-    ("family_only",    ("family",)),
 ]
 
 # Ordered tier labels for comparison (lower index = higher confidence).
@@ -56,25 +57,29 @@ _TIER_ORDER: dict[str, int] = {label: i for i, (label, _) in enumerate(MATCH_CAS
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class _NormalizedRef:
     """Internal: one normalized reference entry (from name or alias)."""
+
     model_id: int
-    name_normalized: str   # the LLMMetadata.name_normalized (shared across aliases)
-    source_string: str     # the specific string that was normalized
-    fields: dict           # output of normalize(source_string)
+    name_normalized: str  # the LLMMetadata.name_normalized (shared across aliases)
+    source_string: str  # the specific string that was normalized
+    fields: dict  # output of normalize(source_string)
 
 
 @dataclass(frozen=True)
 class MatchCandidate:
     """A single match candidate returned to the caller."""
+
     model_id: int
-    name_normalized: str   # LLMMetadata.name_normalized
-    matched_via: str       # which reference string triggered the match
-    tier: str              # cascade level label
+    name_normalized: str  # LLMMetadata.name_normalized
+    matched_via: str  # which reference string triggered the match
+    tier: str  # cascade level label
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_key(fields: dict, field_names: tuple[str, ...]) -> tuple:
     """Build a hashable lookup key from selected fields."""
@@ -82,6 +87,7 @@ def _make_key(fields: dict, field_names: tuple[str, ...]) -> tuple:
 
 
 # ── ModelMatcher ──────────────────────────────────────────────────────────────
+
 
 class ModelMatcher:
     """
@@ -149,9 +155,7 @@ class ModelMatcher:
 
         return []
 
-    def match_batch(
-        self, queries: list[str]
-    ) -> dict[str, list[MatchCandidate]]:
+    def match_batch(self, queries: list[str]) -> dict[str, list[MatchCandidate]]:
         """Match multiple queries. Returns ``{raw_query: [candidates]}``."""
         return {q: self.match(q) for q in queries}
 
@@ -196,19 +200,19 @@ class ModelMatcher:
     # ── Internal helpers ──────────────────────────────────────────────────
 
     @staticmethod
-    def _dedup(
-        refs: list[_NormalizedRef], tier: str
-    ) -> list[MatchCandidate]:
+    def _dedup(refs: list[_NormalizedRef], tier: str) -> list[MatchCandidate]:
         """Deduplicate refs by model_id, keeping first occurrence."""
         seen: set[int] = set()
         out: list[MatchCandidate] = []
         for ref in refs:
             if ref.model_id not in seen:
                 seen.add(ref.model_id)
-                out.append(MatchCandidate(
-                    model_id=ref.model_id,
-                    name_normalized=ref.name_normalized,
-                    matched_via=ref.source_string,
-                    tier=tier,
-                ))
+                out.append(
+                    MatchCandidate(
+                        model_id=ref.model_id,
+                        name_normalized=ref.name_normalized,
+                        matched_via=ref.source_string,
+                        tier=tier,
+                    )
+                )
         return out
