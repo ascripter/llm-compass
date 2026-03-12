@@ -114,9 +114,9 @@ def _is_slug(s: str) -> bool:
 # =============================================================================
 
 _CAMEL_PASSES = [
-    (re.compile(r"([A-Z]{2,})([A-Z][a-z])"), r"\1 \2"),   # GPTOss -> GPT Oss
-    (re.compile(r"([a-z])([A-Z])"), r"\1 \2"),              # camelCase -> camel Case
-    (re.compile(r"(\d)([A-Z][a-z])"), r"\1 \2"),            # 4Turbo -> 4 Turbo
+    (re.compile(r"([A-Z]{2,})([A-Z][a-z])"), r"\1 \2"),  # GPTOss -> GPT Oss
+    (re.compile(r"([a-z])([A-Z])"), r"\1 \2"),  # camelCase -> camel Case
+    (re.compile(r"(\d)([A-Z][a-z])"), r"\1 \2"),  # 4Turbo -> 4 Turbo
 ]
 
 
@@ -134,9 +134,7 @@ def _split_camel(s: str) -> str:
 _SAMPLING_RE = re.compile(r"\(T\s*=\s*[\d.]+\)|\bT\s*=\s*[\d.]+\b", re.I)
 
 # Inference-level qualifiers: (high reasoning), (low reasoning), (xhigh reasoning), etc.
-_INFERENCE_RE = re.compile(
-    r"\(\s*(xhigh|high|medium|low|default)\s+(reasoning)\s*\)", re.I
-)
+_INFERENCE_RE = re.compile(r"\(\s*(xhigh|high|medium|low|default)\s+(reasoning)\s*\)", re.I)
 
 # Standalone reasoning in parens: (reasoning)
 _REASONING_PAREN_RE = re.compile(r"\(\s*reasoning\s*\)", re.I)
@@ -144,12 +142,16 @@ _REASONING_PAREN_RE = re.compile(r"\(\s*reasoning\s*\)", re.I)
 # Variant triggers in parentheses
 _PAREN_VARIANT_RE = re.compile(
     r"\(\s*(thinking|think|non[-_]?thinking|nonthinking|instruct|preview|"
-    r"experimental|exp|codex|reasoner|reasoning|base)\s*\)", re.I
+    r"experimental|exp|codex|reasoner|reasoning|base)\s*\)",
+    re.I,
 )
 
 # Date in parentheses: (20250514), (2025-05-06), (2512), etc.
-_DATE_PAREN_RE = re.compile(
-    r"\(\s*(\d{4}-\d{2}-\d{2}|\d{8}|\d{4}-\d{2}|\d{1,2}/\d{2,4})\s*\)"
+_DATE_PAREN_RE = re.compile(r"\(\s*(\d{4}-\d{2}-\d{2}|\d{8}|\d{4}-\d{2}|\d{1,2}/\d{2,4})\s*\)")
+
+# Month abbreviation in parentheses: (Jan), (Feb), etc.
+_MONTH_PAREN_RE = re.compile(
+    r"\(\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\)", re.I
 )
 
 
@@ -178,7 +180,7 @@ def _extract_parenthesized(s: str) -> tuple[str, str, Optional[str], Optional[st
         if reasoning_effort == "default":
             reasoning_effort = "medium"
         variant = "reasoning"
-        s = s[:m.start()] + " " + s[m.end():]
+        s = s[: m.start()] + " " + s[m.end() :]
 
     # 2. Extract standalone "(reasoning)"
     if not variant:
@@ -186,7 +188,7 @@ def _extract_parenthesized(s: str) -> tuple[str, str, Optional[str], Optional[st
         if m:
             variant = "reasoning"
             reasoning_effort = "medium"  # default when no level specified
-            s = s[:m.start()] + " " + s[m.end():]
+            s = s[: m.start()] + " " + s[m.end() :]
 
     # 3. Extract other variant triggers: "(Thinking)", "(Instruct)", etc.
     if not variant:
@@ -194,13 +196,27 @@ def _extract_parenthesized(s: str) -> tuple[str, str, Optional[str], Optional[st
         if m:
             raw_variant = m.group(1).lower().replace("-", "").replace("_", "")
             variant = _VARIANT_MAP.get(raw_variant, raw_variant)
-            s = s[:m.start()] + " " + s[m.end():]
+            s = s[: m.start()] + " " + s[m.end() :]
 
     # 4. Extract date from parentheses
     m = _DATE_PAREN_RE.search(s)
     if m:
         paren_date = m.group(1)
-        s = s[:m.start()] + " " + s[m.end():]
+        s = s[: m.start()] + " " + s[m.end() :]
+
+    # 4b. Extract month abbreviation from parentheses: (Jan), (Feb), etc.
+    if not paren_date:
+        m = _MONTH_PAREN_RE.search(s)
+        if m:
+            paren_date = m.group(1).lower()
+            s = s[: m.start()] + " " + s[m.end() :]
+
+    # 4c. Extract standalone reasoning effort: (xhigh), (high), (low), etc.
+    if reasoning_effort is None:
+        m = re.search(r"\(\s*(xhigh|high|medium|low|adaptive)\s*\)", s, re.I)
+        if m:
+            reasoning_effort = m.group(1).lower()
+            s = s[: m.start()] + " " + s[m.end() :]
 
     # 5. Strip any remaining parenthesized content (unknown annotations)
     s = re.sub(r"\([^)]*\)", " ", s)
@@ -219,10 +235,10 @@ _VARIANT_MAP: dict[str, str] = {
     "nonthinking": "non-thinking",
     "non-thinking": "non-thinking",
     "instruct": "instruct",
-    # "codex": "codex",
-    # "preview": "preview",
-    # "exp": "exp",
-    # "experimental": "exp",
+    "codex": "codex",
+    "preview": "preview",
+    "exp": "exp",
+    "experimental": "exp",
     "reasoning": "thinking",
     "reasoner": "thinking",
     "non-reasoning": "non-thinking",
@@ -231,14 +247,17 @@ _VARIANT_MAP: dict[str, str] = {
 }
 
 # Variant tokens that can appear as trailing segments in slugs
-_VARIANT_SLUG_TOKENS = frozenset(_VARIANT_MAP.values()) | frozenset({
-    "it",  # gemma instruction-tuned suffix
-})
+_VARIANT_SLUG_TOKENS = frozenset(_VARIANT_MAP.values()) | frozenset(
+    {
+        "it",  # gemma instruction-tuned suffix
+    }
+)
 
 # Multi-segment variants that appear in reference names
 _MULTI_SEGMENT_VARIANTS = [
     ("fast", "non", "reasoning"),
     ("fast", "reasoning"),
+    ("thinking", "preview"),
     ("non", "thinking"),
     ("non", "reasoning"),
     ("deep", "research"),
@@ -258,7 +277,7 @@ def _detect_variant_in_slug(tokens: list[str]) -> tuple[str, Optional[str], list
     for pattern in _MULTI_SEGMENT_VARIANTS:
         plen = len(pattern)
         if n >= plen:
-            tail = tuple(tokens[n - plen:])
+            tail = tuple(tokens[n - plen :])
             if tail == pattern:
                 variant = "-".join(pattern)
                 # Normalize compound variants
@@ -270,6 +289,8 @@ def _detect_variant_in_slug(tokens: list[str]) -> tuple[str, Optional[str], list
                     variant = "non-thinking"
                 elif variant == "non-reasoning":
                     variant = "non-reasoning"
+                elif variant == "thinking-preview":
+                    variant = "thinking"
                 elif variant == "deep-research":
                     variant = "deep-research"
                 indices = list(range(n - plen, n))
@@ -320,8 +341,11 @@ def _detect_size_in_tokens(tokens: list[str], skip: set[int]) -> tuple[Optional[
             return tok.lower(), [i]
         if _SIZE_RE.match(tok) and tok[-1].lower() != "k":
             # Check if next token is an active-param suffix: a22b, a3b
-            if (i + 1 < len(tokens) and i + 1 not in skip
-                    and re.match(r"^a\d+(?:\.\d+)?[tbmk]$", tokens[i + 1], re.I)):
+            if (
+                i + 1 < len(tokens)
+                and i + 1 not in skip
+                and re.match(r"^a\d+(?:\.\d+)?[tbmk]$", tokens[i + 1], re.I)
+            ):
                 return f"{tok.lower()}-{tokens[i+1].lower()}", [i, i + 1]
             return tok.lower(), [i]
     return None, []
@@ -376,24 +400,39 @@ def _detect_version_in_tokens(
 
 _DATE_PATTERNS = [
     # Full ISO date: 2025-05-14
-    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), lambda m: f"{m.group(1)}-{m.group(2)}-{m.group(3)}"),
-    # 8-digit date: 20250514
-    (re.compile(r"\b(20\d{2})(\d{2})(\d{2})\b"), lambda m: f"{m.group(1)}-{m.group(2)}-{m.group(3)}"),
+    (
+        re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"),
+        lambda m: f"{m.group(1)}-{m.group(2)}-{m.group(3)}",
+    ),
+    # 8-digit date: 20250514 — preserve as-is
+    (
+        re.compile(r"\b(20\d{6})\b"),
+        lambda m: m.group(1),
+    ),
     # Preview date: preview 05-14
     (re.compile(r"[Pp]review\s+(\d{2})-(\d{2})\b"), lambda m: f"2025-{m.group(1)}-{m.group(2)}"),
     # Year-month: 2025-05
     (re.compile(r"\b(\d{4})-(\d{2})\b"), lambda m: f"{m.group(1)}-{m.group(2)}"),
     # Compact YYMM: -2512, -0324 (only if >= 20xx range)
-    (re.compile(r"[\-](\d{2})(\d{2})(?:\b|$)"),
-     lambda m: f"20{m.group(1)}-{m.group(2)}" if 20 <= int(m.group(1)) <= 30 else None),
+    (
+        re.compile(r"[\-](\d{2})(\d{2})(?:\b|$)"),
+        lambda m: f"20{m.group(1)}-{m.group(2)}" if 20 <= int(m.group(1)) <= 30 else None,
+    ),
     # Slash dates: (1/25), (4/2025)
     (re.compile(r"\((\d{1,2})/(\d{2})\)"), lambda m: f"20{m.group(2)}-{m.group(1).zfill(2)}"),
     (re.compile(r"\((\d{1,2})/(\d{4})\)"), lambda m: f"{m.group(2)}-{m.group(1).zfill(2)}"),
+    # Trailing MMDD: 0905 (month 01-12, day 01-31) — preserve as-is
+    (
+        re.compile(r"(?:^|[\s\-_])(\d{4})$"),
+        lambda m: m.group(1)
+        if 1 <= int(m.group(1)[:2]) <= 12 and 1 <= int(m.group(1)[2:]) <= 31
+        else None,
+    ),
 ]
 
 _DATE_SLUG_RE = re.compile(
-    r"^(20\d{2})-?(\d{2})-?(\d{2})$"   # 2025-05-14 or 20250514
-    r"|^(\d{4})$"                         # 2512 (compact YYMM)
+    r"^(20\d{2})-?(\d{2})-?(\d{2})$"  # 2025-05-14 or 20250514
+    r"|^(\d{4})$"  # 2512 (compact YYMM)
 )
 
 
@@ -416,6 +455,14 @@ def _is_date_token(tok: str) -> bool:
                 return True
         except ValueError:
             pass
+        # 4-digit MMDD: month 01-12, day 01-31
+        try:
+            mm = int(tok[:2])
+            dd = int(tok[2:])
+            if 1 <= mm <= 12 and 1 <= dd <= 31:
+                return True
+        except ValueError:
+            pass
     return False
 
 
@@ -426,7 +473,7 @@ def _extract_date(raw: str) -> Optional[str]:
         if m:
             try:
                 date = fmt(m)
-                if date and re.match(r"\d{4}-\d{2}", date):
+                if date:
                     return date
             except Exception:
                 pass
@@ -481,7 +528,13 @@ PROVIDER_PATTERNS = [
     (re.compile(r"^o\d+$", re.I), "openai"),
     (re.compile(r"^gemini$|^google$|^gemma$", re.I), "google"),
     (re.compile(r"^llama$|^meta$", re.I), "meta"),
-    (re.compile(r"^mistral$|^mixtral$|^devstral$|^ministral$|^magistral$|^pixtral$|^codestral$|^voxtral$", re.I), "mistral"),
+    (
+        re.compile(
+            r"^mistral$|^mixtral$|^devstral$|^ministral$|^magistral$|^pixtral$|^codestral$|^voxtral$",
+            re.I,
+        ),
+        "mistral",
+    ),
     (re.compile(r"^qwen\d*$|^qwq$", re.I), "alibaba"),
     (re.compile(r"^deepseek$", re.I), "deepseek"),
     (re.compile(r"^grok$|^xai$", re.I), "xai"),
@@ -557,10 +610,20 @@ def _detect_provider(tokens: list[str], raw: str = "") -> str:
 # =============================================================================
 
 # True noise words to discard from family — NOT subfamily tokens
-_FAMILY_NOISE = frozenset({
-    "model", "ai", "the", "by", "from", "new", "latest", "updated",
-    "adaptive", "chat",
-})
+_FAMILY_NOISE = frozenset(
+    {
+        "model",
+        "ai",
+        "the",
+        "by",
+        "from",
+        "new",
+        "latest",
+        "updated",
+        "adaptive",
+        "chat",
+    }
+)
 
 
 def _build_family(
@@ -583,13 +646,43 @@ def _build_family(
                     # Special case: tokens like "deepseek" ARE the family — don't skip
                     tok_lower = tokens[0].lower()
                     is_family_brand = tok_lower in {
-                        "deepseek", "minimax", "qwen", "grok", "claude", "gemini",
-                        "gemma", "mistral", "mixtral", "llama", "phi", "jamba",
-                        "falcon", "granite", "reka", "sonar", "cogito", "hermes",
-                        "olmo", "olmo3", "devstral", "ministral", "magistral",
-                        "pixtral", "codestral", "voxtral", "mimo", "ernie",
-                        "kimi", "glm", "chatglm", "dbrx", "arctic",
-                        "command", "nova", "nemotron", "sora",
+                        "deepseek",
+                        "minimax",
+                        "qwen",
+                        "grok",
+                        "claude",
+                        "gemini",
+                        "gemma",
+                        "mistral",
+                        "mixtral",
+                        "llama",
+                        "phi",
+                        "jamba",
+                        "falcon",
+                        "granite",
+                        "reka",
+                        "sonar",
+                        "cogito",
+                        "hermes",
+                        "olmo",
+                        "olmo3",
+                        "devstral",
+                        "ministral",
+                        "magistral",
+                        "pixtral",
+                        "codestral",
+                        "voxtral",
+                        "mimo",
+                        "ernie",
+                        "kimi",
+                        "glm",
+                        "chatglm",
+                        "dbrx",
+                        "arctic",
+                        "command",
+                        "nova",
+                        "nemotron",
+                        "sora",
                     }
                     if not is_family_brand:
                         provider_skip.add(0)
@@ -624,7 +717,7 @@ def _to_slug(s: str) -> str:
     s = _split_camel(s)
 
     # Normalize separators: spaces, underscores, slashes, colons, plus -> hyphens
-    s = re.sub(r"[\s_/\\:+]+", "-", s)
+    s = re.sub(r"[\s_/\\:]+", "-", s)
 
     # Lowercase
     s = s.lower()
@@ -747,28 +840,38 @@ def normalize(raw: str) -> dict:
         # Append explicit variant from parentheses if not already in slug
         if paren_variant and not main_slug.endswith(f"-{paren_variant}"):
             # Also check multi-word variants
-            if not any(main_slug.endswith(f"-{v}") for v in [paren_variant] + paren_variant.split("-")):
+            if not any(
+                main_slug.endswith(f"-{v}") for v in [paren_variant] + paren_variant.split("-")
+            ):
                 main_slug = f"{main_slug}-{paren_variant}"
 
         # Set variant from parenthesized or detect from slug tokens
         tokens = main_slug.split("-")
+
+        # Detect date tokens early so variant detection sees the right trailing token
+        date_idx = _detect_date_tokens(tokens)
+
         if paren_variant:
             variant = paren_variant
             # Remove variant tokens from the end of the token list for family extraction
             variant_indices = []
             variant_parts = paren_variant.split("-")
-            if tokens[-len(variant_parts):] == variant_parts:
+            if tokens[-len(variant_parts) :] == variant_parts:
                 variant_indices = list(range(len(tokens) - len(variant_parts), len(tokens)))
         else:
-            variant, reasoning_effort, variant_indices = _detect_variant_in_slug(tokens)
-
-        # Also detect inline variant tokens that aren't from parentheses
-        # e.g. "deepseek-v3.2-exp-thinking" has "thinking" as a trailing token
-        if not variant and not paren_variant:
-            variant, reasoning_effort, variant_indices = _detect_variant_in_slug(tokens)
+            # Strip date tokens from the end before variant detection
+            non_date_tokens = [t for i, t in enumerate(tokens) if i not in date_idx]
+            paren_effort = reasoning_effort
+            variant, reasoning_effort, vi = _detect_variant_in_slug(non_date_tokens)
+            if paren_effort is not None:
+                reasoning_effort = paren_effort
+            # Map indices back to original token list
+            non_date_indices = [i for i in range(len(tokens)) if i not in date_idx]
+            variant_indices = [non_date_indices[i] for i in vi]
 
         canonical_id = main_slug
-        if date:
+        # Only append date if not already present in the slug
+        if date and not main_slug.endswith(date):
             canonical_id = f"{main_slug}-{date}"
         base_id = main_slug
 
