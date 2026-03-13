@@ -86,12 +86,12 @@ REFERENCE_MODELS = [
     },
     {
         "id": 15,
-        "name_normalized": "gpt-5.1-codex",
+        "name_normalized": "gpt-5.2-codex",
         "name_aliases": [],
     },
     {
         "id": 16,
-        "name_normalized": "gpt-5.1-codex-max",
+        "name_normalized": "gpt-5.2-codex-max",
         "name_aliases": [],
     },
     {
@@ -103,6 +103,16 @@ REFERENCE_MODELS = [
         "id": 18,
         "name_normalized": "kimi-k2-0905",
         "name_aliases": ["kimi-k2-instruct-0905"],
+    },
+    {
+        "id": 19,
+        "name_normalized": "mimo-v2-flash",
+        "name_aliases": [],
+    },
+    {
+        "id": 20,
+        "name_normalized": "gpt-5.2-pro",
+        "name_aliases": [],
     },
 ]
 
@@ -331,6 +341,7 @@ class TestMatchCandidateFields:
         ("GPT-5.2", 2),
         ("gpt-5.2-2025-12-11", 2),
         ("GPT 5.2", 2),
+        ("GPT-5.2 (2025-12-11) (medium reasoning)", 2),
         # o4-mini (id=3)
         ("o4-mini", 3),
         ("O4-Mini", 3),
@@ -375,11 +386,11 @@ class TestMatchCandidateFields:
         # MiniMax M2.5 (id=14)
         ("MiniMax-M2.5", 14),
         ("minimax-m2.5", 14),
-        # GPT 5.1 Codex (id=15)
-        ("GPT 5.1 Codex", 15),
-        ("gpt-5.1-codex", 15),
-        # GPT 5.1 Codex (max) (id=16)
-        ("gpt-5.1-codex-max", 16),
+        # GPT 5.2 Codex (id=15)
+        ("GPT 5.2 Codex", 15),
+        ("gpt-5.2-codex", 15),
+        # GPT 5.2 Codex (max) (id=16)
+        ("gpt-5.2-codex-max", 16),
         # DeepSeek V3 (0324) (id=17)
         ("DeepSeek V3 0324", 17),
         ("deepseek-v3-0324", 17),
@@ -388,6 +399,10 @@ class TestMatchCandidateFields:
         ("Kimi K2 (0905)", 18),
         ("kimi-k2-0905", 18),
         ("kimi-k2-instruct-0905", 18),
+        # Mimo V2 flash (id=19)
+        ("MiMo-V2-Flash", 19),
+        # GPT 5.2 Pro (id=20)
+        ("GPT5.2 Pro", 20),
     ],
 )
 def test_single_match(matcher, query, expected_id):
