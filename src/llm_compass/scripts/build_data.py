@@ -28,6 +28,7 @@ if __name__ == "__main__":
 
     # No need to change directory manually with sys.path fix
     settings = get_settings()
+    settings.setup_app_logging("dev")
     db = Database(settings)
     db.init_db()
     norm = Normalizer(settings)
@@ -39,16 +40,16 @@ if __name__ == "__main__":
     )
 
     records_models = llm_metadata_from_local_json(settings)
-    ingest_llm_metadata(records=records_models, database=db, normalizer=norm, update=False)
+    ingest_llm_metadata(records=records_models, database=db, normalizer=norm, update=True)
 
     records_scores = benchmark_scores_from_googlesheet()
     ingest_benchmark_scores(
-        records=records_scores, database=db, normalizer=norm, update=True, skip_fk=True
+        records=records_scores, database=db, normalizer=norm, update=True, skip_fk=False
     )
 
     raw_names = raw_model_names_from_googlesheet()
     ingest_model_normalized(
-    raw_model_names=raw_names,
-    database=db,
-    update=True,
+        raw_model_names=raw_names,
+        database=db,
+        update=True,
     )

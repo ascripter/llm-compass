@@ -3,14 +3,24 @@ Req 1.1: Supports Manual Import (CSV) and Scheduled Aggregation.
 Handles data ingestion strategies for SQLite *and* FAISS
 """
 
+import logging
 from typing import Any
 
 from sqlalchemy import insert, delete
 from .database import Database
 from .embedding import Embedding
-from .models import BenchmarkDictionary, LLMMetadata, BenchmarkScore, ModelNormalized, ModelNormalizedSchema
+from .models import (
+    BenchmarkDictionary,
+    LLMMetadata,
+    BenchmarkScore,
+    ModelNormalized,
+    ModelNormalizedSchema,
+)
 from .matcher import ModelMatcher
 from .normalizer import Normalizer, normalize
+
+
+logger = logging.getLogger(__name__)
 
 
 def ingest_benchmark_dictionary(
@@ -38,7 +48,7 @@ def ingest_benchmark_dictionary(
     # Write to DB
     with database.SessionLocal() as session:
         if update:
-            n_updated = 0
+            added = 0
             for row in records:
                 exists = (
                     session.query(BenchmarkDictionary)
@@ -46,23 +56,24 @@ def ingest_benchmark_dictionary(
                     .first()
                 )
                 if not exists:
-                    print(f"inserting benchmark {row['name_normalized']} {row['variant']}")
-                    n_updated += 1
+                    added += 1
+                    logger.debug(f"inserting benchmark {row['name_normalized']} {row['variant']}")
                     session.execute(insert(BenchmarkDictionary).values(**row))
             session.commit()
             all_records = session.query(BenchmarkDictionary).all()
             all_records = [dict(_.__dict__) for _ in all_records]  # Convert to list of dicts
         else:
             # bulk recreate
+            added = len(records)
             session.execute(delete(BenchmarkDictionary))
-            n_updated = len(records)
             session.execute(insert(BenchmarkDictionary).values(records))
             session.commit()
             all_records = records
+        logger.info(f"{added} benchmarks added to BenchmarkDictionary table")
 
     # (re)write FAISS index
     # tbd: allow update instead of full rewrite, but for MVP we can live with this
-    if n_updated > 0:
+    if added > 0:
         embedding.generate_index(all_records, text_key="name_normalized", id_key="id")
 
 
@@ -87,6 +98,7 @@ def ingest_llm_metadata(
     # Write to DB
     with database.SessionLocal() as session:
         if update:
+            added = 0
             for row in records:
                 exists = (
                     session.query(LLMMetadata)
@@ -94,13 +106,16 @@ def ingest_llm_metadata(
                     .first()
                 )
                 if not exists:
-                    print(f"inserting LLM {row['name_normalized']}")
+                    added += 1
+                    logger.debug(f"inserting LLM {row['name_normalized']}")
                     session.execute(insert(LLMMetadata).values(**row))
             session.commit()
         else:
+            added = len(records)
             session.execute(delete(LLMMetadata))
             session.execute(insert(LLMMetadata).values(records))
             session.commit()
+        logger.info(f"{added} models added to LLMMetadata table")
 
 
 def ingest_benchmark_scores(
@@ -125,27 +140,20 @@ def ingest_benchmark_scores(
     bench_names = [r["original_benchmark_name"] for r in records]
     bench_variants = [r["original_benchmark_variant"] for r in records]
     bench_norm = normalizer.normalize_benchmark_names(bench_names, bench_variants)
-    model_names = [r["original_model_name"] for r in records]
-    model_norm = normalizer.normalize_model_names(model_names)
 
     # For FK resolution: benchmark lookup by name+variant, model lookup via matcher
     fk_lookup_benchmark = {
         f"{_.name_normalized}#{_.variant if _.variant else ''}": _
         for _ in database.SessionLocal().query(BenchmarkDictionary).all()
-    }
+    }  # {"name#variant": >BenchmarkDictionary object>}
 
-    all_models = database.SessionLocal().query(LLMMetadata).all()
     matcher = ModelMatcher()
-    matcher.build_index([
-        {"id": m.id, "name_normalized": m.name_normalized,
-         "name_aliases": m.name_aliases}
-        for m in all_models
-    ])
+    matcher.build_index_from_db(database.SessionLocal())
 
     unresolved_models: list[str] = []
+    unresolved_benchmarks: list[str] = []
 
-    _z = zip(records, bench_norm, model_norm)
-    for row, (bench_name_norm, bench_variant_norm), model_name_norm in _z:
+    for row, (bench_name_norm, bench_variant_norm) in zip(records, bench_norm):
         bench_variant_str = bench_variant_norm if bench_variant_norm else ""
 
         # Skip FK resolution if set
@@ -157,34 +165,45 @@ def ingest_benchmark_scores(
         # BenchmarkDictionary: We use normalized names for FK resolution in existing tables
         benchmark_fk = fk_lookup_benchmark.get(f"{bench_name_norm}#{bench_variant_str}")
         if not benchmark_fk:
-            raise ValueError(
-                f"Could not find benchmark FK for {bench_name_norm} {bench_variant_str}"
+            unresolved_benchmarks.append(
+                bench_name_norm + f" ({bench_variant_norm})" if bench_variant_norm else ""
             )
-        row["benchmark_id"] = benchmark_fk.id
+            # logger.warning(
+            #    f"Could not find benchmark '{bench_name_norm}', variant '{bench_variant_str}'"
+            # )
+        else:
+            row["benchmark_id"] = benchmark_fk.id
 
         # LLMMetadata: Use cascade matcher on the original raw name
         model_id = matcher.resolve(row["original_model_name"])
         if model_id is None:
             unresolved_models.append(row["original_model_name"])
-            continue
-        row["model_id"] = model_id
+        else:
+            row["model_id"] = model_id
 
     if unresolved_models:
         unique = sorted(set(unresolved_models))
-        print(f"[WARNING] {len(unique)} unresolved model names:")
+        msg = f"{len(unique)} unresolved model names:"
         for name in unique:
             candidates = matcher.match(name)
-            detail = (
-                f"  ambiguous: {[c.name_normalized for c in candidates]}"
-                if candidates else "  no candidates"
-            )
-            print(f"  - {name!r} {detail}")
+            if candidates:
+                msg += f"\n  {name!r} -> {[c.name_normalized for c in candidates]}"
+            else:
+                msg += f"\n  {name!r} -> no candidates"
+        logger.warning(msg)
+    if unresolved_benchmarks:
+        unique = sorted(set(unresolved_models))
+        msg = f"{len(unique)} unresolved benchmark names: {unique}"
+        logger.warning(msg)
 
-    # Filter out rows without model_id (unresolved)
-    records = [r for r in records if "model_id" in r and r["model_id"]]
+    # Filter out rows without model_id or benchmark_id (unresolved)
+    records = [
+        r for r in records if r.get("model_id") is not None and r.get("benchmark_id") is not None
+    ]
 
     with database.SessionLocal() as session:
         if update:
+            added = 0
             for row in records:
                 exists = (
                     session.query(BenchmarkScore)
@@ -197,16 +216,20 @@ def ingest_benchmark_scores(
                     .first()
                 )
                 if not exists:
-                    print(
-                        f"inserting score for model_id {row['model_id']} on "
-                        f"benchmark_id {row['benchmark_id']}"
+                    added += 1
+                    logger.debug(
+                        f"inserting score for {row['original_model_name']} on "
+                        f"benchmark {row['original_benchmark_name']}: {row['score_value']} "
+                        f"{row['metric_unit']}"
                     )
                     session.execute(insert(BenchmarkScore).values(**row))
             session.commit()
         else:
+            added = len(records)
             session.execute(delete(BenchmarkScore))
             session.execute(insert(BenchmarkScore).values(records))
             session.commit()
+        logger.info(f"{added} benchmark scores added to BenchmarkScore table")
 
 
 def ingest_model_normalized(
@@ -245,11 +268,7 @@ def ingest_model_normalized(
         )
     """
     # ── 1. Normalize — one record per sheet row, blanks skipped ──────────────
-    normalized: list[dict] = [
-        normalize(name.strip())
-        for name in raw_model_names
-        if name.strip()
-    ]
+    normalized: list[dict] = [normalize(name.strip()) for name in raw_model_names if name.strip()]
 
     # ── 2. Validate with Pydantic (catches bad data early) ───────────────────
     validated: list[dict] = []
@@ -258,19 +277,17 @@ def ingest_model_normalized(
             schema = ModelNormalizedSchema(**record)
             validated.append(schema.model_dump())
         except Exception as exc:
-            raise ValueError(
-                f"Validation failed for raw='{record.get('raw')}': {exc}"
-            ) from exc
+            raise ValueError(f"Validation failed for raw='{record.get('raw')}': {exc}") from exc
 
     # ── 3. Write to DB ────────────────────────────────────────────────────────
     with database.SessionLocal() as session:
         if not update:
             # Dev / reset mode: wipe table first
             session.execute(delete(ModelNormalized))
-            print("[model_normalized] Table wiped.")
+            logger.info("[model_normalized] Table wiped.")
 
         session.execute(insert(ModelNormalized).values(validated))
         session.commit()
-        print(f"[model_normalized] Inserted {len(validated)} rows.")
+        logger.info(f"[model_normalized] Inserted {len(validated)} rows.")
 
     return validated

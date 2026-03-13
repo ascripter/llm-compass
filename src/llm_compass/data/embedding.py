@@ -1,5 +1,6 @@
 """Handle FAISS embeddings for BenchmarkDictionary model."""
 
+import logging
 from functools import lru_cache
 from typing import Any
 
@@ -10,6 +11,9 @@ import faiss
 
 from llm_compass.config import Settings
 from .models import BenchmarkDictionary
+
+
+logger = logging.getLogger(__name__)
 
 
 EMBED_MODEL = "qwen/qwen3-embedding-8b"
@@ -85,7 +89,7 @@ class Embedding:
         Returns:
             None (writes index to disk); can raise exceptions on failure
         """
-        print(f"Generating FAISS index for {len(records)} records...")
+        logger.info(f"Generating FAISS index for {len(records)} records...")
         texts = [record[text_key] for record in records]
         doc_ids = [record[id_key] for record in records]
 

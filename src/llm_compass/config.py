@@ -37,6 +37,8 @@ class Settings:
     log_console_level_backend: str
     log_file_level_frontend: str
     log_console_level_frontend: str
+    log_file_level_dev: str
+    log_console_level_dev: str
 
     @classmethod
     def from_env(
@@ -53,6 +55,8 @@ class Settings:
         log_console_level_backend: str = "INFO",
         log_file_level_frontend: str = "DEBUG",
         log_console_level_frontend: str = "INFO",
+        log_file_level_dev: str = "DEBUG",
+        log_console_level_dev: str = "DEBUG",
     ) -> "Settings":
         # By default, load_dotenv() does not override already-set env vars
         if load_dotenv_file:
@@ -82,6 +86,8 @@ class Settings:
             log_console_level_backend=log_console_level_backend,
             log_file_level_frontend=log_file_level_frontend,
             log_console_level_frontend=log_console_level_frontend,
+            log_file_level_dev=log_file_level_dev,
+            log_console_level_dev=log_console_level_dev,
         )
 
     def get_benchmark_description_csv(self) -> Path:
@@ -111,7 +117,7 @@ class Settings:
         """
         Configures the root logger for the calling application.
         """
-        assert name in ("backend", "frontend")
+        assert name in ("backend", "frontend", "dev")
         filename = f"{name}.log"
 
         config = {

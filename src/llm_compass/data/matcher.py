@@ -30,6 +30,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional
 
+from sqlalchemy.orm import Session
+
+from llm_compass.config import get_settings
+from .database import Database
+from .models import LLMMetadata
 from .normalizer import normalize
 
 
@@ -132,6 +137,17 @@ class ModelMatcher:
                     key = _make_key(fields, field_names)
                     self._maps[label][key].append(ref)
 
+    def build_index_from_db(self, session: Session | None = None):
+        """Populate the matcher index from LLMMetadata table"""
+        session = session or Database(get_settings()).SessionLocal()
+        all_models = session.query(LLMMetadata).all()
+        self.build_index(
+            [
+                {"id": m.id, "name_normalized": m.name_normalized, "name_aliases": m.name_aliases}
+                for m in all_models
+            ]
+        )
+
     # ── Matching ──────────────────────────────────────────────────────────
 
     def match(self, query: str) -> list[MatchCandidate]:
@@ -164,7 +180,7 @@ class ModelMatcher:
     def resolve(
         self,
         query: str,
-        min_tier: str = "family_only",
+        min_tier: str = "family_version",
     ) -> Optional[int]:
         """
         Return the ``model_id`` of the single best candidate, or ``None``.
@@ -192,7 +208,7 @@ class ModelMatcher:
     def resolve_batch(
         self,
         queries: list[str],
-        min_tier: str = "family_only",
+        min_tier: str = "family_version",
     ) -> dict[str, Optional[int]]:
         """Batch version of :meth:`resolve`."""
         return {q: self.resolve(q, min_tier=min_tier) for q in queries}
