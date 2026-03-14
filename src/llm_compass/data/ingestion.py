@@ -4,6 +4,7 @@ Handles data ingestion strategies for SQLite *and* FAISS
 """
 
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import insert, delete
@@ -21,6 +22,22 @@ from .normalizer import Normalizer, normalize
 
 
 logger = logging.getLogger(__name__)
+
+_SEPARATOR_RE = re.compile(r"[\s.,:;_#+*-]+")
+_BRACES_RE = re.compile(r"[][)(}{]")
+
+
+def _benchmark_matching_string(benchmark_name: str, benchmark_variant: str):
+    """Lightweight / interim normalization (not stored in DB, just for matching)
+
+    Return key that ignores differences in lower/uppercase
+    or dash/underscore/blank separator.
+    """
+    name = re.sub(_SEPARATOR_RE, "-", benchmark_name.strip().lower())
+    name = re.sub(_BRACES_RE, "_", name)
+    variant = re.sub(_SEPARATOR_RE, "-", benchmark_variant.strip().lower())
+    variant = re.sub(_BRACES_RE, "_", variant)
+    return f"{name}#{variant}"
 
 
 def ingest_benchmark_dictionary(
@@ -143,9 +160,9 @@ def ingest_benchmark_scores(
 
     # For FK resolution: benchmark lookup by name+variant, model lookup via matcher
     fk_lookup_benchmark = {
-        f"{_.name_normalized}#{_.variant if _.variant else ''}": _
+        _benchmark_matching_string(_.name_normalized, _.variant): _
         for _ in database.SessionLocal().query(BenchmarkDictionary).all()
-    }  # {"name#variant": >BenchmarkDictionary object>}
+    }  # {"name#variant": <BenchmarkDictionary object>}
 
     matcher = ModelMatcher()
     matcher.build_index_from_db(database.SessionLocal())
@@ -163,16 +180,15 @@ def ingest_benchmark_scores(
             continue
 
         # BenchmarkDictionary: We use normalized names for FK resolution in existing tables
-        benchmark_fk = fk_lookup_benchmark.get(f"{bench_name_norm}#{bench_variant_str}")
-        if not benchmark_fk:
+        key = _benchmark_matching_string(bench_name_norm, bench_variant_str)
+        benchmark_object = fk_lookup_benchmark.get(key)
+
+        if not benchmark_object:
             unresolved_benchmarks.append(
                 bench_name_norm + f" ({bench_variant_norm})" if bench_variant_norm else ""
             )
-            # logger.warning(
-            #    f"Could not find benchmark '{bench_name_norm}', variant '{bench_variant_str}'"
-            # )
         else:
-            row["benchmark_id"] = benchmark_fk.id
+            row["benchmark_id"] = benchmark_object.id
 
         # LLMMetadata: Use cascade matcher on the original raw name
         model_id = matcher.resolve(row["original_model_name"])
@@ -192,7 +208,7 @@ def ingest_benchmark_scores(
                 msg += f"\n  {name!r} -> no candidates"
         logger.warning(msg)
     if unresolved_benchmarks:
-        unique = sorted(set(unresolved_models))
+        unique = sorted(set(unresolved_benchmarks))
         msg = f"{len(unique)} unresolved benchmark names: {unique}"
         logger.warning(msg)
 
