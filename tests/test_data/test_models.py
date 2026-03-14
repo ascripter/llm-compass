@@ -12,13 +12,20 @@ def test_llm_metadata_uniqueness(session):
     """
     Req 1.2.D: Ensure 'name_normalized' is unique for models.
     """
+    from datetime import date
+
     model1 = LLMMetadata(
         name_normalized="Llama 3 70B",
         provider="Meta",
-        cost_input_1m=0.9,
-        cost_output_1m=0.9,
-        modality_input="text",
+        model_type="instruct",
+        release_date=date(2024, 1, 1),
+        modality_input=["text"],
+        cost_input_text_1m=0.9,
+        cost_output_text_1m=0.9,
+        speed_class="medium",
         is_open_weights=True,
+        reasoning_type="none",
+        tool_calling="standard",
     )
     session.add(model1)
     session.commit()
@@ -27,9 +34,15 @@ def test_llm_metadata_uniqueness(session):
     model2 = LLMMetadata(
         name_normalized="Llama 3 70B",
         provider="Meta",
-        cost_input_1m=0.5,
-        cost_output_1m=0.5,
-        modality_input="text",
+        model_type="instruct",
+        release_date=date(2024, 1, 1),
+        modality_input=["text"],
+        cost_input_text_1m=0.5,
+        cost_output_text_1m=0.5,
+        speed_class="medium",
+        is_open_weights=False,
+        reasoning_type="none",
+        tool_calling="standard",
     )
     session.add(model2)
 
