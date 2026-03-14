@@ -715,7 +715,7 @@ def _build_family(
                         "nova",
                         "nemotron",
                         "sora",
-                    }
+                    } or bool(re.match(r"^o\d+$", tok_lower))
                     if not is_family_brand:
                         provider_skip.add(0)
                 break

@@ -119,6 +119,16 @@ REFERENCE_MODELS = [
         "name_normalized": "gpt-5.2-high",
         "name_aliases": [],
     },
+    {
+        "id": 22,
+        "name_normalized": "o3-mini",
+        "name_aliases": [],
+    },
+    {
+        "id": 23,
+        "name_normalized": "o4",
+        "name_aliases": [],
+    },
 ]
 
 
@@ -358,6 +368,15 @@ class TestMatchCandidateFields:
         # o4-mini (id=3)
         ("o4-mini", 3),
         ("O4-Mini", 3),
+        ("o4 Mini(high)", 3),
+        ("o4-mini(high)", 3),
+        ("o4 Mini (high)", 3),
+        # o4 (id=23)
+        ("o4", 23),
+        ("O4", 23),
+        ("o4 high", 23),
+        ("o4(high)", 23),
+        ("o4 (high)", 23),
         # Gemini 2.5 Flash (id=5)
         ("Gemini 2.5 Flash", 5),
         ("gemini-2.5-flash", 5),
