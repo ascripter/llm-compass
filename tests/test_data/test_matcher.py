@@ -332,7 +332,14 @@ class TestMatchCandidateFields:
     [
         # Claude 3.5 Sonnet (id=1)
         ("Claude 3.5 Sonnet (20241022)", 1),
+        ("Claude 3.5 Sonnet medium (20241022)", 1),
+        ("Claude 3.5 Sonnet medium", 1),
+        ("Claude 3.5 Sonnet (medium reasoning)", 1),
+        ("Claude 3.5 Sonnet (20241022) medium", 1),
+        ("Claude 3.5 Sonnet (20241022) medium effort", 1),
+        ("Claude 3.5 Sonnet (20241022) medium reasoning", 1),
         ("Claude Sonnet 3.5", 1),
+        ("Claude Sonnet 3.5 medium", 1),
         ("Claude 3.5 Sonnet (latest)", 1),
         ("claude-3-5-sonnet-20241022", 1),
         ("claude-3.5-sonnet", 1),

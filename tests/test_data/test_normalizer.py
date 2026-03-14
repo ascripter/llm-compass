@@ -76,6 +76,8 @@ class TestHumanReadable:
         "raw, expected_canonical",
         [
             ("Claude 3.5 Sonnet", "claude-3.5-sonnet"),
+            ("Claude 4.5 Opus medium (20251101)", "claude-4.5-opus-20251101"),
+            ("Claude 4.5 Opus high (20251101)", "claude-4.5-opus-20251101-high"),
             ("Gemini 2.5 Flash", "gemini-2.5-flash"),
             ("Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite"),
             ("Gemini 2.5 Flash (Nonthinking)", "gemini-2.5-flash-non-thinking"),

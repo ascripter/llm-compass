@@ -1,5 +1,5 @@
 """
-Model Name Normalizer  v3
+Model Name Normalizer  v4
 =========================
 Normalizes raw model name strings into structured canonical records
 ready for PostgreSQL insertion via the ModelNormalized schema.
@@ -155,6 +155,21 @@ _DATE_PAREN_RE = re.compile(r"\(\s*(\d{4}-\d{2}-\d{2}|\d{8}|\d{4}-\d{2}|\d{1,2}/
 # Month abbreviation in parentheses: (Jan), (Feb), etc.
 _MONTH_PAREN_RE = re.compile(r"\(\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\)", re.I)
 
+# Size in parentheses: (8x22B), (8 x 22B), (70B), (30B A3B), (30BA3B)
+_SIZE_PAREN_RE = re.compile(
+    r"\(\s*("
+    r"\d+\s*[xX]\s*\d+(?:\.\d+)?\s*[tbmk]"
+    r"|\d+(?:\.\d+)?\s*[tbmk](?:\s*[aA]\d+(?:\.\d+)?\s*[tbmk])?"
+    r")\s*\)",
+    re.I,
+)
+
+# Trailing inline effort qualifiers (outside parens): "medium", "high effort", etc.
+_INLINE_EFFORT_RE = re.compile(
+    r"\s+(max|xhigh|high|medium|low|adaptive)(?:\s+(?:reasoning|effort))?\s*$",
+    re.I,
+)
+
 
 def _preprocess(raw: str) -> str:
     """Strip quotes, whitespace, sampling annotations."""
@@ -163,12 +178,14 @@ def _preprocess(raw: str) -> str:
     return re.sub(r"\s{2,}", " ", s).strip()
 
 
-def _extract_parenthesized(s: str) -> tuple[str, str, Optional[str], Optional[str]]:
+def _extract_parenthesized(
+    s: str,
+) -> tuple[str, str, Optional[str], Optional[str], Optional[str]]:
     """
     Extract parenthesized content from human-readable input.
 
     Returns:
-        (main_text, variant, reasoning_effort, paren_date)
+        (main_text, variant, reasoning_effort, paren_date, paren_size)
     """
     variant = ""
     reasoning_effort = None
@@ -180,7 +197,8 @@ def _extract_parenthesized(s: str) -> tuple[str, str, Optional[str], Optional[st
         reasoning_effort = m.group(1).lower()
         if reasoning_effort == "default":
             reasoning_effort = "medium"
-        variant = "reasoning"
+        # Medium/default → "thinking" (base model capability); others → "reasoning" (explicit)
+        variant = "thinking" if reasoning_effort == "medium" else "reasoning"
         s = s[: m.start()] + " " + s[m.end() :]
 
     # 2. Extract standalone "(reasoning)"
@@ -219,10 +237,20 @@ def _extract_parenthesized(s: str) -> tuple[str, str, Optional[str], Optional[st
             reasoning_effort = m.group(1).lower()
             s = s[: m.start()] + " " + s[m.end() :]
 
+    # 4d. Extract size from parentheses: (8x22B), (8 x 22B), (70B), (30B A3B)
+    paren_size = None
+    m = _SIZE_PAREN_RE.search(s)
+    if m:
+        size_raw = m.group(1)
+        size_norm = re.sub(r"\s+", "", size_raw).lower()
+        size_norm = re.sub(r"(\d[tbmk])(a\d)", r"\1-\2", size_norm)
+        paren_size = size_norm
+        s = s[: m.start()] + " " + s[m.end() :]
+
     # 5. Strip any remaining parenthesized content (unknown annotations)
     s = re.sub(r"\([^)]*\)", " ", s)
 
-    return re.sub(r"\s{2,}", " ", s).strip(), variant, reasoning_effort, paren_date
+    return re.sub(r"\s{2,}", " ", s).strip(), variant, reasoning_effort, paren_date, paren_size
 
 
 # =============================================================================
@@ -241,6 +269,8 @@ _VARIANT_MAP: dict[str, str] = {
     "non-reasoning": "non-thinking",
     "nonreasoning": "non-thinking",
     "base": "base",
+    "codex": "codex",
+    "preview": "preview",
 }
 
 # Variant tokens that can appear as trailing segments in slugs
@@ -728,6 +758,13 @@ def _to_slug(s: str) -> str:
     # A dot between two letters is a separator; between digits is a version
     s = re.sub(r"(?<=[a-z])\.(?=[a-z])", "-", s)
 
+    # Split fused family-version: "gpt5.2" → "gpt-5.2", "medium3.1" → "medium-3.1"
+    # Requires 2+ letters to avoid splitting single-letter prefixes (v3.1, m2.1)
+    s = re.sub(r"([a-z]{2,})(\d+\.\d+)", r"\1-\2", s)
+
+    # Split fused MoE sizes: "30ba3b" → "30b-a3b"
+    s = re.sub(r"(\d[tbmk])(a\d)", r"\1-\2", s)
+
     return s
 
 
@@ -825,10 +862,24 @@ def normalize(raw: str) -> dict:
             protected = pat.sub(replacement, protected)
 
         # Extract parenthesized content
-        main_text, paren_variant, reasoning_effort, paren_date = _extract_parenthesized(protected)
+        main_text, paren_variant, reasoning_effort, paren_date, paren_size = (
+            _extract_parenthesized(protected)
+        )
 
         if paren_date and not date:
             date = paren_date
+
+        # Extract trailing inline effort qualifier (e.g. "Claude 3.5 Sonnet medium")
+        inline_effort = None
+        if reasoning_effort is None:
+            m = _INLINE_EFFORT_RE.search(main_text)
+            if m:
+                effort_word = m.group(1).lower()
+                if effort_word == "default":
+                    effort_word = "medium"
+                inline_effort = effort_word
+                reasoning_effort = effort_word
+                main_text = main_text[: m.start()].strip()
 
         # Convert main text to slug
         main_slug = _to_slug(main_text)
@@ -836,13 +887,33 @@ def normalize(raw: str) -> dict:
         # Strip provider prefix
         main_slug = _strip_provider_prefix(main_slug)
 
+        # Insert parenthesized size with variant-as-suffix reordering
+        if paren_size:
+            slug_tokens = main_slug.split("-")
+            _, _, vi = _detect_variant_in_slug(slug_tokens)
+            if vi:
+                # Move variant to end, insert size before it
+                non_variant = [t for i, t in enumerate(slug_tokens) if i not in vi]
+                variant_toks = [slug_tokens[i] for i in vi]
+                main_slug = "-".join(non_variant + [paren_size] + variant_toks)
+            else:
+                main_slug = f"{main_slug}-{paren_size}"
+
+        # Determine if variant/date should be suppressed from canonical_id
+        # Medium/default reasoning = base model with thinking capability, not a distinct variant
+        suppress_variant_in_id = paren_variant == "thinking" and reasoning_effort == "medium"
+        # Suppress date only for paren-sourced medium reasoning (not inline effort)
+        suppress_date_in_id = suppress_variant_in_id and inline_effort is None
+
         # Append explicit variant from parentheses if not already in slug
-        if paren_variant and not main_slug.endswith(f"-{paren_variant}"):
-            # Also check multi-word variants
-            if not any(
-                main_slug.endswith(f"-{v}") for v in [paren_variant] + paren_variant.split("-")
-            ):
-                main_slug = f"{main_slug}-{paren_variant}"
+        if paren_variant and not suppress_variant_in_id:
+            if not main_slug.endswith(f"-{paren_variant}"):
+                # Also check multi-word variants
+                if not any(
+                    main_slug.endswith(f"-{v}")
+                    for v in [paren_variant] + paren_variant.split("-")
+                ):
+                    main_slug = f"{main_slug}-{paren_variant}"
 
         # Set variant from parenthesized or detect from slug tokens
         tokens = main_slug.split("-")
@@ -854,9 +925,10 @@ def normalize(raw: str) -> dict:
             variant = paren_variant
             # Remove variant tokens from the end of the token list for family extraction
             variant_indices = []
-            variant_parts = paren_variant.split("-")
-            if tokens[-len(variant_parts) :] == variant_parts:
-                variant_indices = list(range(len(tokens) - len(variant_parts), len(tokens)))
+            if not suppress_variant_in_id:
+                variant_parts = paren_variant.split("-")
+                if tokens[-len(variant_parts) :] == variant_parts:
+                    variant_indices = list(range(len(tokens) - len(variant_parts), len(tokens)))
         else:
             # Strip date tokens from the end before variant detection
             non_date_tokens = [t for i, t in enumerate(tokens) if i not in date_idx]
@@ -869,9 +941,12 @@ def normalize(raw: str) -> dict:
             variant_indices = [non_date_indices[i] for i in vi]
 
         canonical_id = main_slug
-        # Only append date if not already present in the slug
-        if date and not main_slug.endswith(date):
-            canonical_id = f"{main_slug}-{date}"
+        # Only append date if not already present in the slug and not suppressed
+        if date and not main_slug.endswith(date) and not suppress_date_in_id:
+            canonical_id = f"{canonical_id}-{date}"
+        # Append non-medium inline effort AFTER date
+        if inline_effort and inline_effort != "medium":
+            canonical_id = f"{canonical_id}-{inline_effort}"
         base_id = main_slug
 
         # Build skip set for family extraction
