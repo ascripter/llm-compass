@@ -114,6 +114,11 @@ REFERENCE_MODELS = [
         "name_normalized": "gpt-5.2-pro",
         "name_aliases": [],
     },
+    {
+        "id": 21,
+        "name_normalized": "gpt-5.2-high",
+        "name_aliases": [],
+    },
 ]
 
 
@@ -131,11 +136,11 @@ class TestTierExact:
     """Tier 1 — query.canonical_id matches a reference canonical_id exactly."""
 
     def test_gpt_with_reasoning_effort(self, matcher):
-        """'GPT-5.2 (High Reasoning)' → canonical_id 'gpt-5.2-reasoning',
-        which doesn't match 'gpt-5.2' exactly but should match at a lower tier."""
+        """'GPT-5.2 (High Reasoning)' → canonical_id 'gpt-5.2-high', exact match with id=21."""
         candidates = matcher.match("GPT-5.2 (High Reasoning)")
-        assert len(candidates) >= 1
-        assert any(c.model_id == 2 for c in candidates)
+        assert len(candidates) == 1
+        assert candidates[0].model_id == 21
+        assert candidates[0].tier == "exact"
 
     def test_o4_mini(self, matcher):
         """'o4-mini' is its own canonical_id."""
@@ -349,6 +354,7 @@ class TestMatchCandidateFields:
         ("gpt-5.2-2025-12-11", 2),
         ("GPT 5.2", 2),
         ("GPT-5.2 (2025-12-11) (medium reasoning)", 2),
+        ("GPT-5.2 (2025-12-11) (high reasoning)", 21),
         # o4-mini (id=3)
         ("o4-mini", 3),
         ("O4-Mini", 3),

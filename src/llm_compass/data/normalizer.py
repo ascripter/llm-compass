@@ -170,6 +170,9 @@ _INLINE_EFFORT_RE = re.compile(
     re.I,
 )
 
+# Effort-level tokens that can appear as a trailing suffix in slugs
+_EFFORT_TOKENS = frozenset({"low", "medium", "high", "xhigh", "max", "adaptive"})
+
 
 def _preprocess(raw: str) -> str:
     """Strip quotes, whitespace, sampling annotations."""
@@ -826,15 +829,43 @@ def normalize(raw: str) -> dict:
     if _is_slug(cleaned):
         # ── SLUG PATH ──────────────────────────────────────────────────────
         canonical_id = cleaned
-        base_id = _strip_date_suffix(cleaned, date)
         tokens = cleaned.split("-")
 
-        # Detect variant from slug tokens
-        variant, reasoning_effort, variant_indices = _detect_variant_in_slug(tokens)
+        # Step A — Detect trailing effort token (always the very last token)
+        reasoning_effort = None
+        effort_indices: list[int] = []
+        if tokens and tokens[-1] in _EFFORT_TOKENS:
+            reasoning_effort = tokens[-1]
+            effort_indices = [len(tokens) - 1]
 
-        # Build skip set for family extraction
-        skip = set(variant_indices)
+        # Step B — Build base_id via string surgery:
+        #   strip effort suffix → strip date suffix → re-add effort (unless medium)
+        slug_without_effort = (
+            canonical_id[: -(len(reasoning_effort) + 1)] if reasoning_effort else canonical_id
+        )
+        base_slug = _strip_date_suffix(slug_without_effort, date)
+        if reasoning_effort is None or reasoning_effort == "medium":
+            base_id = base_slug
+        else:
+            base_id = f"{base_slug}-{reasoning_effort}"
 
+        # Step C — Derive date token indices from the string difference
+        date_indices: list[int] = []
+        if base_slug != slug_without_effort:
+            date_str = slug_without_effort[len(base_slug) + 1:]  # e.g. "2025-04-14"
+            n_base = len(base_slug.split("-"))
+            date_indices = list(range(n_base, n_base + len(date_str.split("-"))))
+
+        skip = set(effort_indices + date_indices)
+
+        # Step D — Detect variant on tokens without the effort suffix
+        tokens_for_variant = [t for i, t in enumerate(tokens) if i not in set(effort_indices)]
+        variant, _, variant_indices_rel = _detect_variant_in_slug(tokens_for_variant)
+        non_effort_pos = [i for i in range(len(tokens)) if i not in set(effort_indices)]
+        variant_indices = [non_effort_pos[j] for j in variant_indices_rel]
+        skip.update(variant_indices)
+
+        # Step E — Size, version, provider, family
         # Detect size
         size, size_indices = _detect_size_in_tokens(tokens, skip)
         skip.update(size_indices)
@@ -842,10 +873,6 @@ def normalize(raw: str) -> dict:
         # Detect version
         version, version_indices = _detect_version_in_tokens(tokens, skip)
         skip.update(version_indices)
-
-        # Detect date tokens (at end of slug)
-        date_indices = _detect_date_tokens(tokens)
-        skip.update(date_indices)
 
         # Detect provider
         provider = _detect_provider(tokens, raw)
@@ -870,14 +897,12 @@ def normalize(raw: str) -> dict:
             date = paren_date
 
         # Extract trailing inline effort qualifier (e.g. "Claude 3.5 Sonnet medium")
-        inline_effort = None
         if reasoning_effort is None:
             m = _INLINE_EFFORT_RE.search(main_text)
             if m:
                 effort_word = m.group(1).lower()
                 if effort_word == "default":
                     effort_word = "medium"
-                inline_effort = effort_word
                 reasoning_effort = effort_word
                 main_text = main_text[: m.start()].strip()
 
@@ -899,11 +924,10 @@ def normalize(raw: str) -> dict:
             else:
                 main_slug = f"{main_slug}-{paren_size}"
 
-        # Determine if variant/date should be suppressed from canonical_id
-        # Medium/default reasoning = base model with thinking capability, not a distinct variant
-        suppress_variant_in_id = paren_variant == "thinking" and reasoning_effort == "medium"
-        # Suppress date only for paren-sourced medium reasoning (not inline effort)
-        suppress_date_in_id = suppress_variant_in_id and inline_effort is None
+        # When reasoning_effort is set, don't write the variant token into the ID —
+        # the effort level itself is the distinguishing suffix.
+        # (The variant *field* is still populated correctly below.)
+        suppress_variant_in_id = reasoning_effort is not None
 
         # Append explicit variant from parentheses if not already in slug
         if paren_variant and not suppress_variant_in_id:
@@ -941,13 +965,16 @@ def normalize(raw: str) -> dict:
             variant_indices = [non_date_indices[i] for i in vi]
 
         canonical_id = main_slug
-        # Only append date if not already present in the slug and not suppressed
-        if date and not main_slug.endswith(date) and not suppress_date_in_id:
+        # Append date if present and not already in slug
+        if date and not main_slug.endswith(date):
             canonical_id = f"{canonical_id}-{date}"
-        # Append non-medium inline effort AFTER date
-        if inline_effort and inline_effort != "medium":
-            canonical_id = f"{canonical_id}-{inline_effort}"
+        # Append effort level last (ALL effort, including medium, goes into canonical_id)
+        if reasoning_effort:
+            canonical_id = f"{canonical_id}-{reasoning_effort}"
+        # base_id: no date; effort only if non-medium (medium = default, dropped)
         base_id = main_slug
+        if reasoning_effort and reasoning_effort != "medium":
+            base_id = f"{base_id}-{reasoning_effort}"
 
         # Build skip set for family extraction
         skip = set(variant_indices)

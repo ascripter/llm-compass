@@ -57,6 +57,12 @@ class TestRoundtrip:
             "grok-4-fast-reasoning",
             "grok-4-fast-non-reasoning",
             "sonar-reasoning-pro",
+            # Effort-token slugs
+            "gpt-5.2-high",
+            "gpt-5.2-medium",
+            "gpt-4.1-high",
+            "gpt-5.2-codex-max",
+            "gpt-4.1-2025-04-14-high",
         ],
     )
     def test_slug_roundtrip(self, slug):
@@ -76,7 +82,7 @@ class TestHumanReadable:
         "raw, expected_canonical",
         [
             ("Claude 3.5 Sonnet", "claude-3.5-sonnet"),
-            ("Claude 4.5 Opus medium (20251101)", "claude-4.5-opus-20251101"),
+            ("Claude 4.5 Opus medium (20251101)", "claude-4.5-opus-20251101-medium"),
             ("Claude 4.5 Opus high (20251101)", "claude-4.5-opus-20251101-high"),
             ("Gemini 2.5 Flash", "gemini-2.5-flash"),
             ("Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite"),
@@ -95,7 +101,7 @@ class TestHumanReadable:
             ("GPT 5.2", "gpt-5.2"),
             ("GPT5.2", "gpt-5.2"),
             ("GPT5.2 Pro", "gpt-5.2-pro"),
-            ("GPT-5 (2025-08-07) (medium reasoning)", "gpt-5"),
+            ("GPT-5 (2025-08-07) (medium reasoning)", "gpt-5-2025-08-07-medium"),
             ("GPT-4o Mini", "gpt-4o-mini"),
             ("Claude 3.7 Sonnet (20250219)", "claude-3.7-sonnet-20250219"),
             ("Claude 4.5Haiku", "claude-4.5-haiku"),
@@ -282,11 +288,15 @@ class TestReasoningEffort:
         result = normalize("GPT-5.2 (High Reasoning)")
         assert result["variant"] == "reasoning"
         assert result["reasoning_effort"] == "high"
+        assert result["base_id"] == "gpt-5.2-high"
+        assert result["canonical_id"] == "gpt-5.2-high"
 
     def test_low_reasoning(self):
         result = normalize("GPT-5.2 (Low Reasoning)")
         assert result["variant"] == "reasoning"
         assert result["reasoning_effort"] == "low"
+        assert result["base_id"] == "gpt-5.2-low"
+        assert result["canonical_id"] == "gpt-5.2-low"
 
     def test_xhigh_reasoning(self):
         result = normalize("Model X (xhigh reasoning)")
@@ -297,20 +307,23 @@ class TestReasoningEffort:
         result = normalize("GPT-5.2 (Reasoning)")
         assert result["variant"] == "reasoning"
         assert result["reasoning_effort"] == "medium"
+        assert result["base_id"] == "gpt-5.2"
+        assert result["canonical_id"] == "gpt-5.2-medium"
 
     def test_no_reasoning_effort_when_no_variant(self):
         result = normalize("GPT-5.2")
         assert result["reasoning_effort"] is None
 
-    def test_reasoning_not_in_canonical_id(self):
-        """Effort level should NOT appear in canonical_id."""
+    def test_effort_level_is_last_in_canonical_id(self):
+        """Effort level is always the last token in canonical_id."""
         result = normalize("GPT-5.2 (High Reasoning)")
-        assert "high" not in result["canonical_id"]
+        assert result["canonical_id"] == "gpt-5.2-high"
+        assert result["canonical_id"].endswith("-high")
 
-    def test_reasoning_in_canonical_id_as_variant(self):
-        """'reasoning' variant SHOULD appear in canonical_id."""
+    def test_effort_level_is_last_in_base_id(self):
+        """Non-medium effort level is the last token in base_id."""
         result = normalize("GPT-5.2 (High Reasoning)")
-        assert result["canonical_id"] == "gpt-5.2-reasoning"
+        assert result["base_id"] == "gpt-5.2-high"
 
     @pytest.mark.parametrize(
         "raw, expected_reasoning_effort",
@@ -419,3 +432,39 @@ class TestFieldExtraction:
         result = normalize("")
         assert result["canonical_id"] == ""
         assert result["provider"] == "unknown"
+
+
+# ── 7. Effort tokens in slug form ────────────────────────────────────────────
+
+
+class TestSlugEffort:
+    """Effort tokens in slug-form inputs are parsed as reasoning_effort, not family."""
+
+    def test_high_effort_slug(self):
+        r = normalize("gpt-5.2-high")
+        assert r["reasoning_effort"] == "high"
+        assert r["base_id"] == "gpt-5.2-high"
+        assert "high" not in r["family"]
+
+    def test_medium_effort_dropped_from_base_id(self):
+        r = normalize("gpt-5.2-medium")
+        assert r["reasoning_effort"] == "medium"
+        assert r["canonical_id"] == "gpt-5.2-medium"
+        assert r["base_id"] == "gpt-5.2"
+        assert "medium" not in r["family"]
+
+    def test_effort_after_date_slug(self):
+        r = normalize("gpt-4.1-2025-04-14-high")
+        assert r["reasoning_effort"] == "high"
+        assert r["date"] == "2025-04-14"
+        assert r["base_id"] == "gpt-4.1-high"
+        assert "high" not in r["family"]
+        assert "2025" not in r["family"]
+
+    def test_variant_and_effort_slug(self):
+        r = normalize("gpt-5.2-codex-max")
+        assert r["variant"] == "codex"
+        assert r["reasoning_effort"] == "max"
+        assert r["base_id"] == "gpt-5.2-codex-max"
+        assert "max" not in r["family"]
+        assert "codex" not in r["family"]
