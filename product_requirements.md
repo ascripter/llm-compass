@@ -201,7 +201,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
   2. Normalize vector similarity scores to a 0-1 range.
   3. **Aggregation:** If a benchmark appears in multiple query results, sum or average its scores to boost its relevance.
   4. **Filtering:** Return only benchmarks with a final relevance score > `cutoff_score`.
-- **Output:** List of objects: `[{id: "...", name: "HumanEval", weight: 0.95}, ...]`.
+- **Output:** List of objects: `[{id: 12, name_normalized: "HumanEval", ..., score: 0.95}, ...]`.
 
 
 #### B. `retrieve_and_rank_models(benchmark_weights, constraints, token_ratio_estimation)`
@@ -334,23 +334,32 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
   - If `status == "needs_clarification"`: **Pause execution.** Return `clarification_question` to UI. Wait for user reply, then re-enter Node 1 with the updated query.
   - If `status == "valid"`: Proceed to **Node 2 (Query Refiner)**.
 
-#### Node 2: Query Refiner (LLM)
+#### Node 2 (a): Query Refiner (LLM)
 - **Input:** Validated User Query + UI Constraints.  
-  1. **Predict I/O Ratio:** Estimate `input` vs. `output` token volume. Output two floats summing to 1.0.
-     - *Example (RAG):* `{"input": 0.95, "output": 0.05}`
-     - *Example (Long Chat):* `{"input": 0.75, "output": 0.25}`
-     - *Example (Simple Chat):* `{"input": 0.5, "output": 0.5}`
-     - *Example (Novel Writing):* `{"input": 0.1, "output": 0.9}`
-  2. **Search Query Gen:** Generate 3-5 benchmark search queries from user's input.
-- **Output:** `{ "search_queries": [...], "token_ratio_estimation": {...} }`
+- **Search Query Gen:** Generate 3-5 benchmark search queries from user's input.
+- **Output:** `{"search_queries": [...]}`
 
-#### Node 3: Benchmark Discovery (Tool)
+#### Node 2 (b): Token Ratio Estimation (LLM)
+- **Input:** Validated User Query + UI Constraints.  
+- **Predict I/O Ratio:** Estimate `input` vs. `output` token volume per modality. Output eight floats summing to 1.0.
+     - *Example (RAG):* `{"input_text": 0.95, "output_text": 0.05}`
+     - *Example (Long Chat):* `{"input_text": 0.75, "output_text": 0.25}`
+     - *Example (Simple Chat):* `{"input_text": 0.5, "output_text": 0.5}`
+     - *Example (Novel Writing):* `{"input_text": 0.1, "output_text": 0.9}`
+- **Output:** `{ "normalized_input_ratios": {...}, "normalized_output_ratios": {...} }`
+
+#### Node 3 (a): Benchmark Discovery (Tool)
 - **Input:** `search_queries` from Node 2.
 - **Task:** Execute `find_relevant_benchmarks`.
 - **Output:** `weighted_benchmarks: List[Dict]` (e.g., `[{"id": "mmlu", "weight": 0.9}, {"id": "gpqa", "weight": 0.8}]`).
 
+#### Node 3 (b): Benchmark Judgment (Tool)
+- **Input:** `weighted_benchmarks` from Node 3a.
+- **Task:** LLM judging which pre-filtered benchmarks are actually relevant.
+- **Output:** `BenchmarkJudgments: List[dict]` (e.g., `[{"benchmark_id": "mmlu", short_rationale": "...", "relevance_weight": 0.75}, ...]`).
+
 #### Node 4: Scoring & Ranking (Tool)
-- **Input:** `weighted_benchmarks` (from Node 3) + `constraints` and `token_ratio_estimation` (from Global State / Node 2).
+- **Input:** `BenchmarkJudgments` (from Node 3b) + `constraints` and `token_ratio_estimation` (from Global State / Node 2).
 - **Task:** Execute `retrieve_and_rank_models`.
 - **Logic:**
   - Fetch models.
