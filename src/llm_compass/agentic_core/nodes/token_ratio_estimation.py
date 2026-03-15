@@ -56,14 +56,10 @@ def token_ratio_estimation_node(state: AgentState, *, settings: Settings) -> dic
         token_ratio.normalized_output_ratios,
         getattr(token_ratio, "reasoning", "")[:120],
     )
+    input_log = [f"{k}={v:.2f}" for k, v in token_ratio.normalized_input_ratios.items() if v > 0]
+    out_log = [f"{k}={v:.2f}" for k, v in token_ratio.normalized_output_ratios.items() if v > 0]
+    logs = [f"input ({', '.join(input_log)}); output ({', '.join(out_log)})"]
 
-    logs = [
-        (
-            "Token Ratio Estimation: "
-            f"input={token_ratio.normalized_input_ratios}, "
-            f"output={token_ratio.normalized_output_ratios}"
-        )
-    ]
     return {
         "token_ratio_estimation": token_ratio,
         "logs": logs,

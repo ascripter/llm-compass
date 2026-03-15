@@ -96,16 +96,18 @@ def benchmark_discovery_node(
     search_queries = state.get("search_queries", [])
     if not search_queries:
         logger.warning("No search_queries found in state")
-        return {"weighted_benchmarks": []}
+        return {"weighted_benchmarks": [], "logs": ["No benchmarks found"]}
 
     session: Session = config["configurable"]["session"]
     try:
         results = find_relevant_benchmarks(search_queries, settings=settings, session=session)
         logger.info(f"Set weighted_benchmarks: {len(results)} items")
+        logs = [f"{len(results)} found via similarity search"]
         return {
             "weighted_benchmarks": results,
             "average_benchmark_similarity": sum(_["score"] for _ in results) / len(results),
+            "logs": logs,
         }
     except Exception as e:
         logger.error(f"Error in benchmark discovery: {e}")
-        return {"weighted_benchmarks": []}
+        return {"weighted_benchmarks": [], "logs": ["No benchmarks found"]}

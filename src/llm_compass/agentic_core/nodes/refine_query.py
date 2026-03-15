@@ -116,12 +116,10 @@ def query_refiner_node(state: AgentState, *, settings: Settings) -> dict[str, An
     )
 
     logs = [
-        f"Query Refiner: generated {len(search_queries)} search queries.",
+        f"{len(search_queries)} queries",
     ]
     if used_fallback:
-        logs.append(
-            "Query Refiner: query list had fewer than 3 unique entries; fallback queries were appended."
-        )
+        logs.append("Original list had < 3 unique entries => fallback queries appended.")
 
     return {
         "search_queries": search_queries,

@@ -118,8 +118,5 @@ def benchmark_judgment_node(state: AgentState, *, settings: Settings) -> dict:
 
     return {
         "benchmark_judgements": judgments,
-        "logs": [
-            f"BenchmarkJudgment: judged {len(judgments.judgments)} benchmarks, "
-            f"{n_relevant} relevant."
-        ],
+        "logs": [f"{n_relevant} are relevant"],
     }

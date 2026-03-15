@@ -570,5 +570,5 @@ def execute_ranking(state: AgentState, config: RunnableConfig) -> dict:
         len(ranked_results.metadata.get("benchmarks_used", [])),
     )
 
-    logs = [f"Ranking: ranked {top_n} models (top_performance / balanced / budget lists)."]
+    logs = [f"{top_n} matched UI filter"]
     return {"ranked_results": ranked_results, "logs": logs}

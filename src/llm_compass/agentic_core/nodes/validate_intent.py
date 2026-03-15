@@ -177,9 +177,7 @@ def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, 
             "your request properly. Please start over and be as specific as possible:\n"
             f"{HINTS_MSG}"
         )
-        logs.append(
-            (f"Intent Validator: Clarification limit exceeded (count={clarification_count}).")
-        )
+        logs.append((f"Clarification limit exceeded (count={clarification_count})."))
         state_update["clarification_limit_exceeded"] = True
         state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
     elif not response.is_specific or first_ui_mismatch:
@@ -196,7 +194,7 @@ def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, 
                 msg += "Please clarify the following points:\n" + "\n".join(
                     f"- {q}" for q in response.clarification_needed
                 )
-            logs.append(f"Intent Validator: Response not specific:\n'''{msg}'''")
+            logs.append("Response not specific.")
             msg += "\n\n"
 
         if first_ui_mismatch:
@@ -207,13 +205,7 @@ def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, 
             msg += "This conflicts with your selection in the UI. Please change *either* the UI "
             msg += "filters or clarify which input and output modalities you intend to use.\n"
             msg += "UI filters will take precedence and determine the recommendations you get."
-            logs.append(
-                (
-                    "Intent Validator: Modality-mismatch.\nMissing UI input: "
-                    f"{ui_missing_input}; and output: {ui_missing_output}.\n"
-                    "Overspec UI input: {ui_overspec_input}; and output: {ui_overspec_output}"
-                )
-            )
+            logs.append("Modality-mismatch UI / task intent")
             state_update["ui_mismatch_hinted"] = True
             response.is_specific = False  # patch it to trigger iteration of node
         elif ui_mismatch:
@@ -225,19 +217,14 @@ def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, 
             msg += f"- output: {response.intended_output_modalities}\n\n"
             msg += "This currently conflicts with your selection in the UI. Eventually the "
             msg += "UI filters will take precedence and determine the recommendations you get."
-            logs.append(
-                (
-                    "Intent Validator: Consecutive modality-mismatch.\nMissing UI input: "
-                    f"{ui_missing_input}; and output: {ui_missing_output}.\n"
-                    "Overspec UI input: {ui_overspec_input}; and output: {ui_overspec_output}"
-                )
-            )
+            logs.append("Modality-mismatch UI / task intent")
 
         # Append this AIMessage to the conversation history
         state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
+    else:
+        logs.append("Done")
 
-    if logs:
-        state_update["logs"] = logs
+    state_update["logs"] = logs
 
     logger.debug(
         "validate_intent_node EXIT"
