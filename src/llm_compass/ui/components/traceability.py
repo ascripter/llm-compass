@@ -74,11 +74,15 @@ def _step_lines(steps: list[dict]) -> None:
         st.write(_format_step_line(step))
 
 
-def render_live_tracker(steps: list[dict], is_complete: bool) -> None:
+def render_live_tracker(
+    steps: list[dict], is_complete: bool, prior_runs: list[dict] | None = None,
+) -> None:
     """Render inside tracker_ph during and just after streaming.
 
     Shows the dot-row status header and a single open 'Execution trace' expander
-    with step lines added as nodes complete.
+    with step lines added as nodes complete.  When *prior_runs* is provided (e.g.
+    from a previous query before a clarification), those runs are rendered first
+    inside the same expander so only one "Execution trace" section ever appears.
     """
     if not steps:
         return
@@ -98,6 +102,10 @@ def render_live_tracker(steps: list[dict], is_complete: bool) -> None:
     st.markdown(f"`{_dot_row(steps)}`  {label}")
 
     with st.expander("Execution trace", expanded=True):
+        if prior_runs:
+            for run in prior_runs:
+                _step_lines(run["steps"])
+            st.divider()
         rendered_groups: set[frozenset[int]] = set()
         for i, step in enumerate(steps):
             if step["status"] == "pending":
@@ -152,7 +160,7 @@ def render_accumulated_trace(trace_runs: list[dict]) -> None:
     if not trace_runs:
         return
 
-    with st.expander("Execution trace", expanded=False):
+    with st.expander("Execution trace", expanded=True):
         for i, run in enumerate(trace_runs):
             if i > 0:
                 st.divider()

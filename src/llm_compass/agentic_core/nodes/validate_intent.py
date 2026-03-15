@@ -203,7 +203,7 @@ def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, 
             msg += f"- input: {response.intended_input_modalities}\n"
             msg += f"- output: {response.intended_output_modalities}\n\n"
             msg += "This conflicts with your selection in the UI. Please change *either* the UI "
-            msg += "filters or clarify which input and output modalities you intend to use.\n"
+            msg += "filters or clarify which input and output modalities you intend to use.\n\n"
             msg += "UI filters will take precedence and determine the recommendations you get."
             logs.append("Modality-mismatch UI / task intent")
             state_update["ui_mismatch_hinted"] = True

@@ -5,10 +5,7 @@ from llm_compass.config import get_settings
 
 
 def render_results(display: dict | None) -> None:
-    st.subheader("Results")
-
     if display is None:
-        st.info("Run a query to see benchmark results.")
         return
 
     settings = get_settings()
@@ -23,15 +20,20 @@ def render_results(display: dict | None) -> None:
     for w in display.get("warnings", []):
         st.warning(w.get("message", ""))
 
-    # Comparison table from API
+    # Only show Results heading and content when synthesis has produced output
     table = display.get("comparison_table")
+    cards = display.get("recommendation_cards", [])
+
+    if not table and not cards:
+        return
+
+    st.subheader("Results")
+
     if table:
         st.markdown(f"**{table.get('title', 'Results')}**")
         df = pd.DataFrame(table.get("rows", []), columns=table.get("columns", []))
         st.dataframe(df, use_container_width=True)
 
-    # Recommendation cards
-    cards = display.get("recommendation_cards", [])
     if cards:
         st.subheader("Recommendations")
         cols = st.columns(max(len(cards), 1))
