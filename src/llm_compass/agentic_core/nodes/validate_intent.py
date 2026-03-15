@@ -35,30 +35,66 @@ HINTS_MSG = f"""- describe your task clearly
 - if possible, estimate the amount of tokens for input / output *per modality* that will occur with an average LLM invocation"""
 
 # System prompt for the LLM-based validator
-INTENT_VALIDATOR_SYSTEM_PROMPT = f"""You are an intent validation assistant in an AI routing pipeline.
+INTENT_VALIDATOR_SYSTEM_PROMPT = f"""You are an intent validator in an LLM benchmark-routing pipeline.
 
-## Your Task
-Analyze the user's request (and any conversation history) to:
-1. Determine their intended task.
-2. Extract the intended input and output modalities.
-3. Assess whether the request is specific enough to proceed.
+## Goal
+Decide whether the user's request is specific enough to retrieve relevant benchmark descriptions.
 
-Follow the rules and examples defined in your output schema.
+A request is SPECIFIC if the current chat history is sufficient for a downstream retrieval step to find one or more plausible benchmark families for the user's intended task.
 
-## Clarification Scope
-When the request is unclear, ask ONLY about:
-- The actual use case or task description.
-- Input modalities {MODALITY_VALUES}.
-- Output modalities {MODALITY_VALUES}.
+A request is UNSPECIFIC if the core task is still too vague, too broad, or too ambiguous to retrieve relevant benchmarks reliably.
 
-## Strict Rules
-You MUST NOT ask about or mention ANY of the following topics. This is non-negotiable:
-- Open-source vs commercial or proprietary model preferences.
-- Cost or pricing sensitivity.
-- Model speed or latency requirements.
-- General accuracy or benchmark performance.
-- Specific model names or providers.
-- Specific output format."""
+## What to determine
+1. Whether the user's intended task is clear enough.
+2. The intended input modalities.
+3. The intended output modalities.
+4. Whether clarification is needed before benchmark retrieval.
+
+## Decision rule
+Set is_specific = true when:
+- The core task/action is clear.
+- At least one plausible input modality can be identified from the request or normal task defaults.
+- At least one plausible output modality can be identified from the request or normal task defaults.
+- The request is narrow enough that relevant benchmark descriptions could plausibly be retrieved.
+
+Set is_specific = false when:
+- The user has not actually described the task to perform.
+- The request is generic or meta, e.g. "recommend a model", "best LLM", "good benchmark".
+- The core task is materially ambiguous.
+- Input or output modality is materially ambiguous and affects benchmark retrieval.
+- Multiple benchmark families are equally plausible because the request lacks the main task intent.
+
+## Modality defaults
+Infer obvious default modalities when reasonable. Examples:
+- summarize / classify / extract / translate / chat / query -> usually text input, text output
+- OCR / image classification / captioning -> usually image input, text output
+- questions / query AND photos / images -> text AND image input, usually text output
+- speech transcription -> usually audio input, text output
+
+Do NOT mark a request as unspecific only because the user omitted an obvious default modality.
+
+## Clarification scope
+If clarification is needed, ask only about:
+- the actual use case or task
+- missing input modalities: {MODALITY_VALUES}
+- missing output modalities: {MODALITY_VALUES}
+
+## Strict rules
+You MUST NOT ask about or mention:
+- open-source vs commercial preferences
+- cost or pricing sensitivity
+- speed or latency requirements
+- general benchmark performance
+- model names or providers
+- specific output formatting
+- whether the user will provide input as files or via a link
+
+## Output rules
+- Be conservative in asking clarifying questions.
+- Prefer inferred default modalities over unnecessary clarification.
+- If is_specific is true, clarification_needed must be empty.
+- If is_specific is false, clarification_needed must contain 1-3 short questions.
+- Return only data that matches the schema."""
 
 
 def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any]:
@@ -125,6 +161,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         _ for _ in constraints.modality_output if _ not in response.intended_output_modalities
     ]
     ui_mismatch = ui_missing_input or ui_missing_output or ui_overspec_input or ui_overspec_output
+
     logger.debug(
         f"ui_missing_input={ui_missing_input} | ui_missing_output={ui_missing_output} | "
         f"ui_overspec_input={ui_overspec_input} | ui_overspec_output={ui_overspec_output}"
@@ -208,8 +245,8 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         " | intended_input=%s"
         " | intended_output=%s"
         " | messages_appended=%d"
-        " | logs_appended=%d"
-        " | reasoning=%r",
+        " | logs_appended=%d",
+        # " | reasoning=%r",
         getattr(response, "is_specific", None),
         state_update.get("clarification_count", state.get("clarification_count", 0)),
         state_update.get("clarification_limit_exceeded", False),
@@ -217,6 +254,6 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
         getattr(response, "intended_output_modalities", None),
         len(state_update.get("messages", [])),
         len(state_update.get("logs", [])),
-        getattr(response, "reasoning", "")[:120],
+        # getattr(response, "reasoning", "")[:120],
     )
     return state_update

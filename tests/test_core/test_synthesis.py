@@ -15,7 +15,12 @@ from llm_compass.agentic_core.nodes.synthesis import (
     _pick_recommendation_cards,
     synthesis_node,
 )
-from llm_compass.agentic_core.schemas.ranking import BenchmarkResult, RankMetrics, RankedLists, RankedModel
+from llm_compass.agentic_core.schemas.ranking import (
+    BenchmarkResult,
+    RankMetrics,
+    RankedLists,
+    RankedModel,
+)
 from llm_compass.agentic_core.schemas.synthesis import (
     Citation,
     RecommendationCard,
@@ -28,6 +33,7 @@ from llm_compass.config import Settings
 # ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_benchmark_result(
     benchmark_id: int = 1,
@@ -137,7 +143,7 @@ def _make_state(**kwargs) -> dict:
         "messages": [],
         "ranked_results": None,
         "average_benchmark_similarity": 0.8,
-        "intent_extraction": {"reasoning": "User wants a model for legal RAG."},
+        "intent_extraction": {},  # "reasoning": "User wants a model for legal RAG."},
     }
     defaults.update(kwargs)
     return defaults
@@ -146,6 +152,7 @@ def _make_state(**kwargs) -> dict:
 # ---------------------------------------------------------------------------
 # TestBuildComparisonTable
 # ---------------------------------------------------------------------------
+
 
 class TestBuildComparisonTable:
     def test_empty_ranked_lists_gives_empty_rows(self):
@@ -183,7 +190,9 @@ class TestBuildComparisonTable:
 
     def test_benchmark_columns_added_up_to_6(self):
         benchmarks = [
-            _make_benchmark_result(benchmark_id=i, benchmark_name=f"Bench{i}", weight_used=float(i))
+            _make_benchmark_result(
+                benchmark_id=i, benchmark_name=f"Bench{i}", weight_used=float(i)
+            )
             for i in range(1, 8)
         ]
         model = _make_ranked_model(model_id=1, benchmark_results=benchmarks)
@@ -192,9 +201,7 @@ class TestBuildComparisonTable:
         assert len(bench_cols) == 6
 
     def test_benchmark_variant_appended_to_column_name(self):
-        br = _make_benchmark_result(
-            benchmark_name="MMLU", benchmark_variant="5-shot"
-        )
+        br = _make_benchmark_result(benchmark_name="MMLU", benchmark_variant="5-shot")
         model = _make_ranked_model(benchmark_results=[br])
         table = _build_comparison_table(_make_ranked_lists(top_performance=[model]))
         assert "MMLU (5-shot)" in table.columns
@@ -228,6 +235,7 @@ class TestBuildComparisonTable:
 # TestExtractCitations
 # ---------------------------------------------------------------------------
 
+
 class TestExtractCitations:
     def test_empty_ranked_lists_returns_empty(self):
         assert _extract_citations(_make_ranked_lists()) == []
@@ -241,7 +249,9 @@ class TestExtractCitations:
         assert citations[0].label == "HumanEval"
 
     def test_estimated_score_excluded(self):
-        br = _make_benchmark_result(is_estimated=True, source_url="http://paper.com", estimation_note="est")
+        br = _make_benchmark_result(
+            is_estimated=True, source_url="http://paper.com", estimation_note="est"
+        )
         model = _make_ranked_model(benchmark_results=[br])
         citations = _extract_citations(_make_ranked_lists(top_performance=[model]))
         assert citations == []
@@ -274,9 +284,9 @@ class TestExtractCitations:
         m1 = _make_ranked_model(model_id=1, benchmark_results=[br1])
         m2 = _make_ranked_model(model_id=2, benchmark_results=[br2])
         m3 = _make_ranked_model(model_id=3, benchmark_results=[br3])
-        citations = _extract_citations(_make_ranked_lists(
-            top_performance=[m1], balanced=[m2], budget=[m3]
-        ))
+        citations = _extract_citations(
+            _make_ranked_lists(top_performance=[m1], balanced=[m2], budget=[m3])
+        )
         assert len(citations) == 3
 
 
@@ -284,11 +294,16 @@ class TestExtractCitations:
 # TestGenerateWarnings
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateWarnings:
     def test_no_warnings_for_clean_data(self):
         model = _make_ranked_model(cost_null_fraction=0.0)
         ranked = _make_ranked_lists(
-            top_performance=[model, _make_ranked_model(model_id=2), _make_ranked_model(model_id=3)],
+            top_performance=[
+                model,
+                _make_ranked_model(model_id=2),
+                _make_ranked_model(model_id=3),
+            ],
             balanced=[model, _make_ranked_model(model_id=2), _make_ranked_model(model_id=3)],
             budget=[model, _make_ranked_model(model_id=2), _make_ranked_model(model_id=3)],
         )
@@ -367,6 +382,7 @@ class TestGenerateWarnings:
 # TestPickRecommendationCards
 # ---------------------------------------------------------------------------
 
+
 class TestPickRecommendationCards:
     def test_one_card_per_category(self):
         tp = _make_ranked_model(model_id=1, name="perf-winner")
@@ -430,6 +446,7 @@ class TestPickRecommendationCards:
 # TestBuildFallbackSummary
 # ---------------------------------------------------------------------------
 
+
 class TestBuildFallbackSummary:
     def test_includes_intent_reasoning_when_present(self):
         state = _make_state(intent_extraction={"reasoning": "User needs legal RAG."})
@@ -438,6 +455,7 @@ class TestBuildFallbackSummary:
 
     def test_includes_intent_reasoning_from_object(self):
         from types import SimpleNamespace
+
         intent = SimpleNamespace(reasoning="Object-style reasoning.")
         state = _make_state(intent_extraction=intent)
         summary = _build_fallback_summary(state, _make_ranked_lists())
@@ -451,9 +469,7 @@ class TestBuildFallbackSummary:
     def test_includes_model_names_from_ranked_lists(self):
         m = _make_ranked_model(name="best-model", blended_score=0.9)
         state = _make_state(intent_extraction=None)
-        summary = _build_fallback_summary(
-            state, _make_ranked_lists(top_performance=[m])
-        )
+        summary = _build_fallback_summary(state, _make_ranked_lists(top_performance=[m]))
         assert "best-model" in summary
 
     def test_fallback_message_when_no_data(self):
@@ -470,9 +486,7 @@ class TestBuildFallbackSummary:
     def test_top_3_models_per_category(self):
         models = [_make_ranked_model(model_id=i, name=f"model-{i}") for i in range(5)]
         state = _make_state(intent_extraction=None)
-        summary = _build_fallback_summary(
-            state, _make_ranked_lists(top_performance=models)
-        )
+        summary = _build_fallback_summary(state, _make_ranked_lists(top_performance=models))
         # First 3 should appear, 4th and 5th should not
         for i in range(3):
             assert f"model-{i}" in summary
@@ -483,6 +497,7 @@ class TestBuildFallbackSummary:
 # ---------------------------------------------------------------------------
 # TestAssembleSummaryMarkdown
 # ---------------------------------------------------------------------------
+
 
 class TestAssembleSummaryMarkdown:
     def test_contains_task_section(self):
@@ -513,14 +528,13 @@ class TestAssembleSummaryMarkdown:
 # TestHasEstimatedScores
 # ---------------------------------------------------------------------------
 
+
 class TestHasEstimatedScores:
     def test_empty_lists_returns_false(self):
         assert _has_estimated_scores(_make_ranked_lists()) is False
 
     def test_all_non_estimated_returns_false(self):
-        model = _make_ranked_model(
-            benchmark_results=[_make_benchmark_result(is_estimated=False)]
-        )
+        model = _make_ranked_model(benchmark_results=[_make_benchmark_result(is_estimated=False)])
         assert _has_estimated_scores(_make_ranked_lists(top_performance=[model])) is False
 
     def test_one_estimated_returns_true(self):
@@ -537,6 +551,7 @@ class TestHasEstimatedScores:
 # ---------------------------------------------------------------------------
 # TestBuildRankingContext
 # ---------------------------------------------------------------------------
+
 
 class TestBuildRankingContext:
     def test_empty_lists_mentions_no_models(self):
@@ -578,6 +593,7 @@ class TestBuildRankingContext:
 # ---------------------------------------------------------------------------
 # TestSynthesisNode
 # ---------------------------------------------------------------------------
+
 
 class TestSynthesisNode:
     def _ranked_with_two_models(self) -> RankedLists:
@@ -694,7 +710,9 @@ class TestSynthesisNode:
         assert any("generated final response" in log for log in result["logs"])
 
     def test_calibration_note_in_summary_when_estimated(self):
-        br = _make_benchmark_result(is_estimated=True, source_url=None, estimation_note="via bridge")
+        br = _make_benchmark_result(
+            is_estimated=True, source_url=None, estimation_note="via bridge"
+        )
         m = _make_ranked_model(benchmark_results=[br])
         ranked = _make_ranked_lists(top_performance=[m])
         state = _make_state(ranked_results=ranked)

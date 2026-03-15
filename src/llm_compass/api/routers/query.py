@@ -75,16 +75,16 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
     intent = state.get("intent_extraction")
     if intent is not None:
         if isinstance(intent, dict):
-            reasoning = intent.get("reasoning", "")
+            # reasoning = intent.get("reasoning", "")
             inputs = intent.get("intended_input_modalities", [])
             outputs = intent.get("intended_output_modalities", [])
         else:
-            reasoning = getattr(intent, "reasoning", "")
+            # reasoning = getattr(intent, "reasoning", "")
             inputs = getattr(intent, "intended_input_modalities", [])
             outputs = getattr(intent, "intended_output_modalities", [])
         parts.append("## Intent Analysis (DEBUG OUTPUT)")
-        if reasoning:
-            parts.append(reasoning)
+        # if reasoning:
+        #     parts.append(reasoning)
         parts.append(f"**Input modalities:** {', '.join(inputs) if inputs else 'none detected'}")
         parts.append(
             f"**Output modalities:** {', '.join(outputs) if outputs else 'none detected'}"
@@ -95,14 +95,14 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
         if isinstance(token_ratio, dict):
             in_ratios = token_ratio.get("normalized_input_ratios", {})
             out_ratios = token_ratio.get("normalized_output_ratios", {})
-            tr_reasoning = token_ratio.get("reasoning", "")
+            # tr_reasoning = token_ratio.get("reasoning", "")
         else:
             in_ratios = getattr(token_ratio, "normalized_input_ratios", {})
             out_ratios = getattr(token_ratio, "normalized_output_ratios", {})
-            tr_reasoning = getattr(token_ratio, "reasoning", "")
+            # tr_reasoning = getattr(token_ratio, "reasoning", "")
         parts.append("\n## Token Ratio Estimation")
-        if tr_reasoning:
-            parts.append(tr_reasoning)
+        # if tr_reasoning:
+        #     parts.append(tr_reasoning)
         if in_ratios:
             parts.append(f"**Normalized input ratios:** {in_ratios}")
         if out_ratios:
