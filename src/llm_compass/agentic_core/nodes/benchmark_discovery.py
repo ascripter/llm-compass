@@ -1,5 +1,5 @@
 """
-Req 2.3 Node 3: Benchmark Discovery
+Req 2.3 Node 3 (a): Benchmark Discovery
 
 This node executes find_relevant_benchmarks tool using search_queries from Node 2.
 Outputs weighted_benchmarks: List[Dict] with id and weight.
@@ -88,7 +88,7 @@ def find_relevant_benchmarks(
 
 def benchmark_discovery_node(
     state: AgentState, config: RunnableConfig, *, settings: Settings
-) -> AgentState:
+) -> dict:
     """
     Node 3: Execute find_relevant_benchmarks with search_queries.
     Output: weighted_benchmarks as List[Dict] with id and weight.
@@ -96,17 +96,16 @@ def benchmark_discovery_node(
     search_queries = state.get("search_queries", [])
     if not search_queries:
         logger.warning("No search_queries found in state")
-        state["weighted_benchmarks"] = []
-        return state
+        return {"weighted_benchmarks": []}
 
     session: Session = config["configurable"]["session"]
     try:
         results = find_relevant_benchmarks(search_queries, settings=settings, session=session)
-        state["weighted_benchmarks"] = results
-        state["average_benchmark_similarity"] = sum([_["weight"] for _ in results]) / len(results)
         logger.info(f"Set weighted_benchmarks: {len(results)} items")
+        return {
+            "weighted_benchmarks": results,
+            "average_benchmark_similarity": sum(_["weight"] for _ in results) / len(results),
+        }
     except Exception as e:
         logger.error(f"Error in benchmark discovery: {e}")
-        state["weighted_benchmarks"] = []
-
-    return state
+        return {"weighted_benchmarks": []}
