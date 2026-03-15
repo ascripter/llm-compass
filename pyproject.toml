@@ -7,12 +7,18 @@ name = "llm-compass"
 version = "0.1.0"
 requires-python = ">=3.13"
 
+[project.optional-dependencies]
+dev = ["pytest-xdist"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-addopts = "-s"
+addopts = "-n auto"
 log_cli = true
 log_cli_level = "INFO"
+markers = [
+    "llm: marks tests that call a real LLM (deselect with -m 'not llm')",
+]

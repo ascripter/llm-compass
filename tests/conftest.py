@@ -8,6 +8,14 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
 
+def pytest_configure(config):
+    """Configure logging for the test session."""
+    from llm_compass.config import get_settings
+
+    settings = get_settings()
+    settings.setup_app_logging("test")
+
+
 # Use in-memory SQLite for simple logic tests,
 # or a separate Postgres container for vector tests.
 @pytest.fixture(name="session")

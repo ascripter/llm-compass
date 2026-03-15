@@ -24,6 +24,41 @@ _MANDATORY_ENV_VARS = (
     "LLM_COMPASS_LOG_PATH",
 )
 
+# The following modules will only log WARNING and ERROR level
+# depending on the setup
+LOGGER_SILENCE_MODULES = {
+    "backend": [
+        "httpcore.http11",
+        "httpcore.connection",
+        "sqlalchemy.engine.Engine",
+        "uvicorn.access",
+        "uvicorn.error",
+    ],
+    "frontend": [
+        "httpcore.http11",
+        "httpcore.connection",
+        "sqlalchemy.engine.Engine",
+        "uvicorn.access",
+        "uvicorn.error",
+    ],
+    "dev": [
+        "httpcore.http11",
+        "httpcore.connection",
+        "sqlalchemy.engine.Engine",
+        "uvicorn.access",
+        "uvicorn.error",
+    ],
+    "test": [
+        "faiss.loader",
+        "httpx",
+        "httpcore.http11",
+        "httpcore.connection",
+        "sqlalchemy.engine.Engine",
+        "uvicorn.access",
+        "uvicorn.error",
+    ],
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -39,6 +74,8 @@ class Settings:
     log_console_level_frontend: str
     log_file_level_dev: str
     log_console_level_dev: str
+    log_file_level_test: str
+    log_console_level_test: str
 
     @classmethod
     def from_env(
@@ -57,6 +94,8 @@ class Settings:
         log_console_level_frontend: str = "INFO",
         log_file_level_dev: str = "DEBUG",
         log_console_level_dev: str = "DEBUG",
+        log_file_level_test: str = "INFO",
+        log_console_level_test: str = "INFO",
     ) -> "Settings":
         # By default, load_dotenv() does not override already-set env vars
         if load_dotenv_file:
@@ -88,6 +127,8 @@ class Settings:
             log_console_level_frontend=log_console_level_frontend,
             log_file_level_dev=log_file_level_dev,
             log_console_level_dev=log_console_level_dev,
+            log_file_level_test=log_file_level_test,
+            log_console_level_test=log_console_level_test,
         )
 
     def get_benchmark_description_csv(self) -> Path:
@@ -117,7 +158,7 @@ class Settings:
         """
         Configures the root logger for the calling application.
         """
-        assert name in ("backend", "frontend", "dev")
+        assert name in ("backend", "frontend", "dev", "test")
         filename = f"{name}.log"
 
         config = {
@@ -150,15 +191,7 @@ class Settings:
             },
         }
 
-        # The following modules will only log WARNING and ERROR level
-        silence_modules = [
-            "httpcore.http11",
-            "httpcore.connection",
-            "sqlalchemy.engine.Engine",
-            "uvicorn.access",
-            "uvicorn.error",
-        ]
-        for module in silence_modules:
+        for module in LOGGER_SILENCE_MODULES[name]:
             config["loggers"][module] = {"level": "WARNING", "propagate": False}
 
         # Apply the configuration to the process
