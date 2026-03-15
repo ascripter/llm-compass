@@ -251,5 +251,5 @@ def test_benchmark_discovery_node_returns_only_its_state_updates(mock_find_bench
     result = benchmark_discovery_node(state, config, settings=_make_mock_settings())
 
     # Only the keys the node owns should be present in the returned dict
-    assert set(result.keys()) == {"weighted_benchmarks", "average_benchmark_similarity"}
+    assert set(result.keys()) == {"weighted_benchmarks", "average_benchmark_similarity", "logs"}
     assert result["weighted_benchmarks"] == result_benchmarks

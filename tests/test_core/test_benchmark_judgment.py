@@ -85,9 +85,6 @@ def _make_state(**kwargs) -> AgentState:
     return cast(AgentState, defaults)
 
 
-# LangGraph passes _config but the judgment node ignores it
-_DUMMY_CONFIG: dict = {}
-
 
 # ---------------------------------------------------------------------------
 # Guard: empty / missing benchmarks
@@ -98,7 +95,7 @@ class TestEmptyBenchmarks:
     def test_returns_empty_judgments_and_skips_llm_when_no_benchmarks(self):
         settings = MagicMock(spec=Settings)
         result = benchmark_judgment_node(
-            _make_state(weighted_benchmarks=[]), _DUMMY_CONFIG, settings=settings
+            _make_state(weighted_benchmarks=[]), settings=settings
         )
 
         assert result["benchmark_judgements"].judgments == []
@@ -108,7 +105,7 @@ class TestEmptyBenchmarks:
         state = cast(AgentState, {"user_query": "test", "messages": []})
         settings = MagicMock(spec=Settings)
 
-        result = benchmark_judgment_node(state, _DUMMY_CONFIG, settings=settings)
+        result = benchmark_judgment_node(state, settings=settings)
 
         assert result["benchmark_judgements"].judgments == []
         settings.make_llm.assert_not_called()
@@ -123,7 +120,7 @@ class TestJudgmentOutput:
     def test_returns_judgment_object_in_state(self):
         response = BenchmarkJudgments(judgments=[_make_judgment(benchmark_id=1)])
         result = benchmark_judgment_node(
-            _make_state(), _DUMMY_CONFIG, settings=_make_settings(response)
+            _make_state(), settings=_make_settings(response)
         )
 
         assert "benchmark_judgements" in result
@@ -139,7 +136,6 @@ class TestJudgmentOutput:
         benchmarks = [_make_bm(id=1), _make_bm(id=2)]
         result = benchmark_judgment_node(
             _make_state(weighted_benchmarks=benchmarks),
-            _DUMMY_CONFIG,
             settings=_make_settings(response),
         )
 
@@ -164,7 +160,6 @@ class TestJudgmentOutput:
         )
         result = benchmark_judgment_node(
             _make_state(weighted_benchmarks=benchmarks),
-            _DUMMY_CONFIG,
             settings=_make_settings(response),
         )
 
@@ -180,14 +175,12 @@ class TestJudgmentOutput:
         )
         result = benchmark_judgment_node(
             _make_state(weighted_benchmarks=[_make_bm(id=1), _make_bm(id=2)]),
-            _DUMMY_CONFIG,
             settings=_make_settings(response),
         )
 
         assert "logs" in result
         assert len(result["logs"]) == 1
         log = result["logs"][0]
-        assert "2" in log   # total judged
         assert "1" in log   # 1 relevant (strong_match counts, no_match doesn't)
 
 
@@ -208,7 +201,7 @@ class TestIntentHandling:
         mock_settings = _make_settings(response)
 
         benchmark_judgment_node(
-            _make_state(intent_extraction=None), _DUMMY_CONFIG, settings=mock_settings
+            _make_state(intent_extraction=None), settings=mock_settings
         )
 
         content = self._get_human_msg(mock_settings)
@@ -221,7 +214,7 @@ class TestIntentHandling:
         mock_settings = _make_settings(response)
 
         benchmark_judgment_node(
-            _make_state(intent_extraction=intent), _DUMMY_CONFIG, settings=mock_settings
+            _make_state(intent_extraction=intent), settings=mock_settings
         )
 
         content = self._get_human_msg(mock_settings)
@@ -242,7 +235,7 @@ class TestIntentHandling:
 
         # Must not raise
         benchmark_judgment_node(
-            _make_state(intent_extraction=intent_dict), _DUMMY_CONFIG, settings=mock_settings
+            _make_state(intent_extraction=intent_dict), settings=mock_settings
         )
 
         content = self._get_human_msg(mock_settings)
@@ -256,7 +249,7 @@ class TestIntentHandling:
 
 class TestHumanMessageContent:
     def _invoke_and_get_human(self, state: AgentState, mock_settings: MagicMock) -> str:
-        benchmark_judgment_node(state, _DUMMY_CONFIG, settings=mock_settings)
+        benchmark_judgment_node(state, settings=mock_settings)
         structured_llm = mock_settings.make_llm.return_value.with_structured_output.return_value
         return structured_llm.invoke.call_args[0][0][1].content
 

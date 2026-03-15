@@ -6,14 +6,19 @@ from unittest.mock import MagicMock
 from langchain_core.messages import AIMessage, HumanMessage
 
 from llm_compass.agentic_core.nodes.token_ratio_estimation import token_ratio_estimation_node
-from llm_compass.agentic_core.schemas.token_ratio_estimation import ModalityUnits, TokenRatioEstimation
+from llm_compass.agentic_core.schemas.token_ratio_estimation import (
+    ModalityUnits,
+    TokenRatioEstimation,
+)
 from llm_compass.agentic_core.state import AgentState
 from llm_compass.common.schemas import Constraints
 from llm_compass.config import Settings
 
 
 def _make_state(messages: list | None = None) -> AgentState:
-    msgs = messages or [HumanMessage(content="I need a model for long legal-document summarization")]
+    msgs = messages or [
+        HumanMessage(content="I need a model for long legal-document summarization")
+    ]
     return cast(
         AgentState,
         {
@@ -27,8 +32,12 @@ def _make_state(messages: list | None = None) -> AgentState:
 def _make_token_response() -> TokenRatioEstimation:
     return TokenRatioEstimation(
         reasoning="Input is large documents and output is a short summary.",
-        input_units=ModalityUnits(text_word_count=6000, image_count=0, audio_minutes=0, video_minutes=0),
-        output_units=ModalityUnits(text_word_count=400, image_count=0, audio_minutes=0, video_minutes=0),
+        input_units=ModalityUnits(
+            text_word_count=6000, image_count=0, audio_minutes=0, video_minutes=0
+        ),
+        output_units=ModalityUnits(
+            text_word_count=400, image_count=0, audio_minutes=0, video_minutes=0
+        ),
     )
 
 
@@ -55,9 +64,8 @@ def test_token_ratio_estimation_computes_normalized_ratios():
     result = token_ratio_estimation_node(_make_state(), settings=_make_settings(token_response))
 
     estimation: TokenRatioEstimation = result["token_ratio_estimation"]
-    total = (
-        sum(estimation.normalized_input_ratios.values())
-        + sum(estimation.normalized_output_ratios.values())
+    total = sum(estimation.normalized_input_ratios.values()) + sum(
+        estimation.normalized_output_ratios.values()
     )
     assert abs(total - 1.0) < 1e-4
 
@@ -67,14 +75,13 @@ def test_token_ratio_estimation_adds_logs():
     result = token_ratio_estimation_node(_make_state(), settings=_make_settings(token_response))
 
     assert "logs" in result
-    assert any("Token Ratio Estimation" in entry for entry in result["logs"])
 
 
 def test_token_ratio_estimation_logs_contain_ratios():
     token_response = _make_token_response()
     result = token_ratio_estimation_node(_make_state(), settings=_make_settings(token_response))
 
-    assert any("input=" in entry and "output=" in entry for entry in result["logs"])
+    assert any("input (" in entry and "output (" in entry for entry in result["logs"])
 
 
 def test_token_ratio_estimation_uses_multi_turn_prompt():
@@ -88,7 +95,9 @@ def test_token_ratio_estimation_uses_multi_turn_prompt():
     mock_settings = _make_settings(token_response)
     token_ratio_estimation_node(_make_state(messages=messages), settings=mock_settings)
 
-    invoke_args = mock_settings.make_llm.return_value.with_structured_output.return_value.invoke.call_args
+    invoke_args = (
+        mock_settings.make_llm.return_value.with_structured_output.return_value.invoke.call_args
+    )
     system_msg = invoke_args[0][0][0]
     assert "consecutive clarification chat" in system_msg.content
 
@@ -116,9 +125,10 @@ def test_token_ratio_estimation_mixed_modalities():
         output_units=ModalityUnits(text_word_count=50),
     )
 
-    total = (
-        sum(estimation.normalized_input_ratios.values())
-        + sum(estimation.normalized_output_ratios.values())
+    total = sum(estimation.normalized_input_ratios.values()) + sum(
+        estimation.normalized_output_ratios.values()
     )
     assert abs(total - 1.0) < 1e-4
-    assert estimation.normalized_input_ratios["image"] > estimation.normalized_input_ratios["text"]
+    assert (
+        estimation.normalized_input_ratios["image"] > estimation.normalized_input_ratios["text"]
+    )

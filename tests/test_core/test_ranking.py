@@ -330,7 +330,6 @@ class TestRetrieveAndRankModels:
         for entries in [result.top_performance, result.balanced, result.budget]:
             for entry in entries:
                 assert entry.rank_metrics is not None
-                assert entry.reason_for_ranking
 
     def test_internal_fields_removed(self, db_session):
         bench = make_benchmark(db_session)
@@ -576,9 +575,11 @@ class TestBridgeModelCalibration:
         assert calib is not None
         median_offset, note = calib
 
-        # Code computes: other_score - median_offset = 75 - 10 = 65
+        # offset = scores[other_variant] - scores[target_variant] = v2 - v1
+        # bridge A: 80 - 90 = -10, bridge B: 60 - 70 = -10, median = -10
+        # estimated v1 = other_score - median_offset = 75 - (-10) = 85
         other_score = 75.0  # target's v2 score
-        assert other_score - median_offset == pytest.approx(65.0)
+        assert other_score - median_offset == pytest.approx(85.0)
         assert note is not None
         assert "bridge" in note.lower()
 

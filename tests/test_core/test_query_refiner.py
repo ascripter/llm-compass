@@ -94,7 +94,7 @@ def test_query_refiner_adds_logs():
     result = query_refiner_node(_make_state(), settings=_make_settings(query_response))
 
     assert "logs" in result
-    assert any("Query Refiner" in entry for entry in result["logs"])
+    assert any("queries" in entry for entry in result["logs"])
 
 
 def test_query_refiner_deduplicates_and_falls_back():
