@@ -38,7 +38,7 @@ def _make_settings(query_response: QueryExpansion) -> MagicMock:
 
 def test_query_refiner_returns_search_queries():
     query_response = QueryExpansion(
-        reasoning="Derived from summarization intent.",
+        # reasoning="Derived from summarization intent.",
         search_queries=[
             "long context summarization benchmark",
             "legal document QA benchmark",
@@ -54,7 +54,7 @@ def test_query_refiner_returns_search_queries():
 
 def test_query_refiner_adds_fallback_queries_when_llm_returns_too_few():
     query_response = QueryExpansion(
-        reasoning="Only one query returned by model.",
+        # reasoning="Only one query returned by model.",
         search_queries=["legal summarization benchmark"],
     )
     result = query_refiner_node(_make_state(), settings=_make_settings(query_response))
@@ -65,22 +65,26 @@ def test_query_refiner_adds_fallback_queries_when_llm_returns_too_few():
 
 def test_query_refiner_supports_dict_constraints_from_checkpoint():
     query_response = QueryExpansion(
-        reasoning="Derived from query and constraints.",
+        # reasoning="Derived from query and constraints.",
         search_queries=[
             "long context summarization benchmark",
             "legal text reasoning benchmark",
             "document retrieval qa benchmark",
         ],
     )
-    constraints = Constraints(min_context_window=0, modality_input=["text"], modality_output=["text"])
-    result = query_refiner_node(_make_state(constraints=constraints.model_dump()), settings=_make_settings(query_response))
+    constraints = Constraints(
+        min_context_window=0, modality_input=["text"], modality_output=["text"]
+    )
+    result = query_refiner_node(
+        _make_state(constraints=constraints.model_dump()), settings=_make_settings(query_response)
+    )
 
     assert len(result["search_queries"]) == 3
 
 
 def test_query_refiner_adds_logs():
     query_response = QueryExpansion(
-        reasoning="Derived from summarization intent.",
+        # reasoning="Derived from summarization intent.",
         search_queries=[
             "long context summarization benchmark",
             "legal document QA benchmark",
@@ -96,7 +100,7 @@ def test_query_refiner_adds_logs():
 def test_query_refiner_deduplicates_and_falls_back():
     # normalize_queries deduplicates to 1 unique query; _ensure_query_count pads to 3
     query_response = QueryExpansion(
-        reasoning="Repeated queries.",
+        # reasoning="Repeated queries.",
         search_queries=["Legal summarization", "legal summarization", "LEGAL SUMMARIZATION"],
     )
     result = query_refiner_node(_make_state(), settings=_make_settings(query_response))
@@ -107,7 +111,7 @@ def test_query_refiner_deduplicates_and_falls_back():
 
 def test_query_refiner_no_fallback_log_when_enough_queries():
     query_response = QueryExpansion(
-        reasoning="Enough unique queries.",
+        # reasoning="Enough unique queries.",
         search_queries=[
             "long context summarization benchmark",
             "legal document QA benchmark",
@@ -122,7 +126,7 @@ def test_query_refiner_no_fallback_log_when_enough_queries():
 def test_query_refiner_handles_empty_messages():
     # Node should build a HumanMessage from user_query when messages is empty
     query_response = QueryExpansion(
-        reasoning="Derived from user query.",
+        # reasoning="Derived from user query.",
         search_queries=[
             "long context summarization benchmark",
             "legal document QA benchmark",

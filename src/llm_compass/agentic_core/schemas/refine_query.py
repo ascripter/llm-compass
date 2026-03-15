@@ -9,11 +9,11 @@ from pydantic import BaseModel, Field, field_validator
 class QueryExpansion(BaseModel):
     """LLM output schema for generating semantic benchmark search queries."""
 
-    reasoning: str = Field(
-        description=(
-            "Briefly explain how the queries were derived from the user task and constraints."
-        )
-    )
+    # reasoning: str = Field(
+    #     description=(
+    #         "Briefly explain how the queries were derived from the user task and constraints."
+    #     )
+    # )
     search_queries: list[str] = Field(
         default_factory=list,
         description=(
