@@ -239,21 +239,17 @@ def test_benchmark_discovery_node_handles_exceptions(mock_find_benchmarks):
 
 
 @patch('llm_compass.agentic_core.nodes.benchmark_discovery.find_relevant_benchmarks')
-def test_benchmark_discovery_node_preserves_other_state(mock_find_benchmarks):
-    """Test that the node preserves other state fields."""
+def test_benchmark_discovery_node_returns_only_its_state_updates(mock_find_benchmarks):
+    """Node returns only the keys it owns; LangGraph merges them into the full state."""
     result_benchmarks = [
         {"id": 3, "name_normalized": "humaneval", "variant": "", "weight": 0.9}
     ]
     mock_find_benchmarks.return_value = result_benchmarks
 
     state = _make_state(["code benchmark"])
-    state["user_query"] = "original query"
-    state["some_other_field"] = "preserved"
-
     config = _make_mock_config()
     result = benchmark_discovery_node(state, config, settings=_make_mock_settings())
 
-    assert result["user_query"] == "original query"
-    assert result["some_other_field"] == "preserved"
-    assert result["search_queries"] == ["code benchmark"]
+    # Only the keys the node owns should be present in the returned dict
+    assert set(result.keys()) == {"weighted_benchmarks", "average_benchmark_similarity"}
     assert result["weighted_benchmarks"] == result_benchmarks

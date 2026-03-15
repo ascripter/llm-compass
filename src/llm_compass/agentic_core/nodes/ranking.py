@@ -16,7 +16,7 @@ from llm_compass.config import Settings
 from llm_compass.common.schemas import Constraints
 from llm_compass.common.types import MODALITY_VALUES
 from llm_compass.data.models import LLMMetadata, BenchmarkScore, BenchmarkDictionary
-from ..schemas import IntentExtraction, QueryExpansion
+from ..schemas import IntentExtraction, QueryExpansion, BenchmarkJudgments
 from ..schemas.ranking import BenchmarkResult, RankMetrics, RankedModel, RankedLists
 from ..state import AgentState
 from sqlalchemy import and_, or_, func
@@ -501,15 +501,30 @@ def execute_ranking(state: AgentState, config: RunnableConfig) -> dict:
     else:
         token_ratio_estimation = token_ratio_val.model_dump()
 
+    # Build benchmark_weights from LLM judgments (Node 3b), falling back to raw
+    # discovery weights if judgments are unavailable.
+    judgements_raw = state.get("benchmark_judgements")
+    if judgements_raw is not None:
+        if isinstance(judgements_raw, dict):
+            judgements_raw = BenchmarkJudgments(**judgements_raw)
+        id_to_name = {bm["id"]: bm.get("name_normalized", "") for bm in state.get("weighted_benchmarks", [])}
+        benchmark_weights = [
+            {"id": j.benchmark_id, "weight": j.relevance_weight, "name": id_to_name.get(j.benchmark_id, "")}
+            for j in judgements_raw.judgments
+            if j.relevance_weight > 0.0
+        ]
+    else:
+        benchmark_weights = state.get("weighted_benchmarks", [])
+
     logger.debug(
         "execute_ranking ENTRY | benchmark_weights=%d | constraints=%s | token_ratio_keys=%s",
-        len(state.get("weighted_benchmarks", [])),
+        len(benchmark_weights),
         constraints,
         list(token_ratio_estimation.keys()),
     )
 
     ranked_results = retrieve_and_rank_models(
-        benchmark_weights=state.get("weighted_benchmarks", []),
+        benchmark_weights=benchmark_weights,
         constraints=constraints,
         token_ratio_estimation=token_ratio_estimation,
         session=session,

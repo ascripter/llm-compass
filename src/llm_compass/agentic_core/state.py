@@ -38,7 +38,7 @@ class AgentState(MessagesState):
     # From Benchmark Discovery and weighting (Req 2.3 Node 3 a and b)
     weighted_benchmarks: List[Dict[str, Any]]
     average_benchmark_similarity: float  # how well do the benchmarks fit in general
-    benchmark_judgements: BenchmarkJudgments
+    benchmark_judgements: Optional[BenchmarkJudgments]
 
     # From Scoring and Ranking (Req 2.3 Node 4)
     ranked_results: Optional[RankedLists]
@@ -65,6 +65,7 @@ def get_initial_state():
             "search_queries": [],
             "weighted_benchmarks": [],
             "average_benchmark_similarity": 0.0,
+            "benchmark_judgements": None,
             "ranked_results": None,
             "final_response": None,
             "logs": [],
