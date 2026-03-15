@@ -224,7 +224,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
       token_ratio_estimation["normalized_output_ratios"]["text"] * cost_output_text_1m
      ```
      - *Definition:* `Blended_Cost_Index` is a normalized "cheaper is better" score [0,1].
-     - *Formula (Per-Query Normalization):* `Blended_Cost_Index = (C_max - Blended_Cost_1M_USD) / max(eps, (C_max - C_min))`, where `C_min` and `C_max` are the min/max blended costs *within the current filtered candidate set* and `eps = 1e-9`.
+     - *Formula (Per-Query Normalization):* `Blended_Cost_Index = (C_max - Blended_Cost_1M_USD) / (C_max - C_min)`, where `C_min` and `C_max` are the min/max blended costs *within the current filtered candidate set*. If all candidates have equal cost, assign `Blended_Cost_Index = 0.5` to all. Models with fully unknown pricing (`cost_null_fraction = 1.0`) are also assigned `Blended_Cost_Index = 0.5` to avoid inflating their rank.
   5. **Ranking Strategy (Multi-View):**
      - **Performance List:** Ranked by `Performance_Index` (Weighted Average of Normalized Scores).
      - **Balanced List:** Ranked by `0.5 * Performance_Index + 0.5 * Blended_Cost_Index`.
@@ -292,7 +292,6 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     "applied_io_ratio": {...},
     // redundant but easily accessible
     "benchmarks_used": ["HumanEval", "MBPP", "Swe-Bench"],
-    "benchmark_scores": [82.5, 70.2, 22.0],
     "benchmark_weights": [0.5, 0.3, 0.2]
   }
 }

@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from llm_compass.common.types import SpeedClass
 
@@ -18,6 +18,12 @@ class BenchmarkResult(BaseModel):
     source_url: Optional[str] = None
     estimation_note: Optional[str] = None
 
+    @model_validator(mode="after")
+    def check_source_url(self) -> "BenchmarkResult":
+        if not self.is_estimated and not self.source_url:
+            raise ValueError("source_url is required for non-estimated benchmark results")
+        return self
+
 
 class RankMetrics(BaseModel):
     performance_index: float
@@ -30,7 +36,7 @@ class RankedModel(BaseModel):
     name_normalized: str
     provider: str
     speed_class: Optional[SpeedClass] = None
-    speed_tps: Optional[float] = None
+    speed_tps: Optional[int] = None
     cost_null_fraction: Optional[float] = Field(
         None,
         ge=0.0,

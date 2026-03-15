@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
 from llm_compass.agentic_core.graph import get_graph
+from llm_compass.agentic_core.schemas.benchmark_judgment import BenchmarkJudgments
 from llm_compass.agentic_core.schemas.ranking import RankedLists
 from llm_compass.agentic_core.schemas.synthesis import SynthesisOutput
 from llm_compass.agentic_core.state import get_initial_state, AgentState
@@ -125,6 +126,38 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
             rows.append(f"| {name} | {variant} | {weight:.3f} |")
         parts.append(header + "\n".join(rows))
 
+    judgements_raw = state.get("benchmark_judgements")
+    if judgements_raw is not None:
+        if isinstance(judgements_raw, BenchmarkJudgments):
+            judgements = judgements_raw
+        elif isinstance(judgements_raw, dict):
+            try:
+                judgements = BenchmarkJudgments.model_validate(judgements_raw)
+            except Exception:
+                judgements = None
+        else:
+            judgements = None
+
+        if judgements is not None:
+            relevant = [j for j in judgements.judgments if j.relevance_weight > 0.0]
+            if relevant:
+                # Build id -> display name lookup from weighted_benchmarks
+                bm_lookup: dict[int, str] = {}
+                for b in weighted_benchmarks:
+                    bid = b.get("id")
+                    if bid is not None:
+                        bm_name = b.get("name_normalized") or b.get("name") or str(bid)
+                        variant = b.get("variant")
+                        bm_lookup[int(bid)] = f"{bm_name} ({variant})" if variant else bm_name
+
+                rows = ["| Benchmark | Relevance | Weight | Rationale |", "|---|---|---|---|"]
+                for j in relevant:
+                    display = bm_lookup.get(j.benchmark_id, str(j.benchmark_id))
+                    rows.append(
+                        f"| {display} | {j.relevance_class} | {j.relevance_weight:.2f} | {j.short_rationale} |"
+                    )
+                parts.append("\n## Benchmark Judgments\n" + "\n".join(rows))
+
     ranked_raw = state.get("ranked_results")
     if isinstance(ranked_raw, RankedLists):
         ranked_results = ranked_raw.model_dump()
@@ -140,17 +173,38 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
         models = ranked_results.get(key) or []
         if not models:
             continue
-        ranking_parts.append(f"**{label}**")
-        for i, m in enumerate(models[:3], 1):
+        ranking_parts.append(f"**{label}** ({len(models)} models)")
+        for i, m in enumerate(models, 1):
             rm = m.get("rank_metrics") or {}
             blended = rm.get("blended_score", 0.0)
+            perf_idx = rm.get("performance_index", 0.0)
+            cost_idx = rm.get("blended_cost_index", 0.0)
             name = m.get("name_normalized") or m.get("model_id", "?")
             provider = m.get("provider", "")
             provider_str = f" ({provider})" if provider else ""
+            speed = m.get("speed_class") or ""
+            speed_str = f" · {speed}" if speed else ""
+            cost_null = m.get("cost_null_fraction") or 0.0
+            cost_null_str = f" · ⚠ cost data {cost_null*100:.0f}% missing" if cost_null > 0 else ""
             reason = m.get("reason_for_ranking", "")
-            ranking_parts.append(f"{i}. **{name}**{provider_str} — blended score: {blended:.3f}")
+            ranking_parts.append(
+                f"{i}. **{name}**{provider_str}{speed_str} — "
+                f"blended: {blended:.3f}  perf: {perf_idx:.3f}  cost_idx: {cost_idx:.3f}{cost_null_str}"
+            )
             if reason:
                 ranking_parts.append(f"   _{reason}_")
+            bm_results = m.get("benchmark_results") or []
+            for br in bm_results:
+                bm_name = br.get("benchmark_name", "?")
+                variant = br.get("benchmark_variant") or ""
+                variant_str = f" ({variant})" if variant else ""
+                score = br.get("score", 0.0)
+                unit = br.get("metric_unit", "")
+                weight = br.get("weight_used", 0.0)
+                estimated = " *(est.)*" if br.get("is_estimated") else ""
+                ranking_parts.append(
+                    f"   - {bm_name}{variant_str}: {score:.1f}{unit}  w={weight:.3f}{estimated}"
+                )
     if ranking_parts:
         parts.append("\n## Ranking Results\n\n" + "\n".join(ranking_parts))
 
@@ -288,6 +342,7 @@ _NODE_LABELS = {
     "token_ratio": "Estimating token ratios",
     "refiner": "Generating search queries",
     "benchmark_discovery": "Discovering benchmarks",
+    "benchmark_judgment": "Judging benchmark relevance",
     "ranking": "Ranking models",
     "synthesis": "Synthesizing response",
 }

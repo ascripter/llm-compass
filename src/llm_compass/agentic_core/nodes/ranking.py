@@ -175,7 +175,7 @@ def _precompute_bridge_calibration(
             scores = bridge_scores_by_name_model.get((bm.name_normalized, bridge_model_id), {})
             if len(scores) == 2 and bm.variant in scores:
                 other_variant = next(v for v in scores if v != bm.variant)
-                offsets.append(scores[bm.variant] - scores[other_variant])
+                offsets.append(scores[other_variant] - scores[bm.variant])
 
         if not offsets:
             result[bid] = None
@@ -268,7 +268,7 @@ def retrieve_and_rank_models(
                 BenchmarkScore.benchmark_id.in_(benchmark_ids),
             )
         )
-        .order_by(BenchmarkScore.date_published.desc().nullslast())
+        .order_by(BenchmarkScore.date_published.desc().nullslast(), BenchmarkScore.date_ingested.desc())
         .all()
     )
     # Keep only the most recent score per (model_id, benchmark_id).
@@ -311,7 +311,8 @@ def retrieve_and_rank_models(
 
     for model in filtered_models:
         benchmark_results = []
-        performance_scores = []
+        # List of (benchmark_id, raw_score, weight) — used for per-benchmark normalization
+        raw_bm_contributions: List[Tuple[int, float, float]] = []
 
         for bw in benchmark_weights:
             benchmark_id = bw["id"]
@@ -334,7 +335,7 @@ def retrieve_and_rank_models(
                         "source_url": score.source_url,
                     }
                 )
-                performance_scores.append(score.score_value * weight)
+                raw_bm_contributions.append((benchmark_id, score.score_value, weight))
             else:
                 # Try bridge model calibration
                 calib = bridge_calibration.get(benchmark_id)
@@ -356,7 +357,7 @@ def retrieve_and_rank_models(
                                 "estimation_note": f"Inferred via bridge model '{bridge_model_name}'",
                             }
                         )
-                        performance_scores.append(estimated_score * weight)
+                        raw_bm_contributions.append((benchmark_id, estimated_score, weight))
 
         if benchmark_results:  # Only include models with at least some benchmark data
             # Step 4: Calculate Blended Cost
@@ -375,7 +376,7 @@ def retrieve_and_rank_models(
                     "benchmark_results": benchmark_results,
                     "blended_cost_1m_usd": blended_cost,
                     "cost_null_fraction": cost_null_fraction,
-                    "raw_performance_score": sum(performance_scores),
+                    "raw_bm_contributions": raw_bm_contributions,
                 }
             )
 
@@ -393,14 +394,32 @@ def retrieve_and_rank_models(
             },
         )
 
-    # Calculate normalized indices
-    performance_scores = [mr["raw_performance_score"] for mr in model_results]
+    # Step 5a: Per-benchmark score normalization → Performance_Index
+    # Collect all raw scores per benchmark across models that have data for it.
+    bm_scores_across_models: Dict[int, List[float]] = {}
+    for mr in model_results:
+        for bid, raw_score, _ in mr["raw_bm_contributions"]:
+            bm_scores_across_models.setdefault(bid, []).append(raw_score)
+
+    # Min/max per benchmark (for 0-1 normalization within each benchmark).
+    bm_min_max: Dict[int, Tuple[float, float]] = {
+        bid: (min(scores), max(scores))
+        for bid, scores in bm_scores_across_models.items()
+    }
+
+    # Compute per-model performance_index = weighted average of per-benchmark normalized scores.
+    for mr in model_results:
+        weighted_sum = 0.0
+        weight_used = 0.0
+        for bid, raw_score, weight in mr["raw_bm_contributions"]:
+            min_s, max_s = bm_min_max[bid]
+            norm_score = 0.5 if max_s == min_s else (raw_score - min_s) / (max_s - min_s)
+            weighted_sum += norm_score * weight
+            weight_used += weight
+        mr["performance_index"] = weighted_sum / weight_used if weight_used > 0 else 0.0
+
+    # Step 5b: Blended cost normalization (lower cost → higher index, i.e. better).
     blended_costs = [mr["blended_cost_1m_usd"] for mr in model_results]
-
-    # Normalize performance scores (higher is better)
-    normalized_performance = _normalize_scores_to_0_1(performance_scores)
-
-    # Normalize blended costs (lower is better, so invert)
     if max(blended_costs) == min(blended_costs):
         normalized_costs = [0.5] * len(blended_costs)
     else:
@@ -409,10 +428,11 @@ def retrieve_and_rank_models(
             for cost in blended_costs
         ]
 
-    # Attach normalized indices to model results
     for i, mr in enumerate(model_results):
-        mr["performance_index"] = normalized_performance[i]
         mr["blended_cost_index"] = normalized_costs[i]
+        # Models with fully unknown pricing get a neutral cost index instead of ranking as cheapest.
+        if mr["cost_null_fraction"] >= 1.0:
+            mr["blended_cost_index"] = 0.5
 
     # Step 5: Generate ranking lists
     # Build RankedModel objects for each ranking strategy.
@@ -436,9 +456,7 @@ def retrieve_and_rank_models(
     # Performance List: Ranked by Performance_Index
     perf_sorted = sorted(model_results, key=lambda x: x["performance_index"], reverse=True)
     top_performance = [
-        _to_ranked_model(
-            mr, mr["performance_index"], f"Performance Index: {mr['performance_index']:.3f}"
-        )
+        _to_ranked_model(mr, mr["performance_index"], "")
         for mr in perf_sorted
     ]
 
@@ -452,7 +470,7 @@ def retrieve_and_rank_models(
         _to_ranked_model(
             mr,
             0.2 * mr["performance_index"] + 0.8 * mr["blended_cost_index"],
-            f"Budget-optimized score: {0.2 * mr['performance_index'] + 0.8 * mr['blended_cost_index']:.3f}",
+            "",
         )
         for mr in budget_sorted
     ]
@@ -467,7 +485,7 @@ def retrieve_and_rank_models(
         _to_ranked_model(
             mr,
             0.5 * mr["performance_index"] + 0.5 * mr["blended_cost_index"],
-            f"Balanced score: {0.5 * mr['performance_index'] + 0.5 * mr['blended_cost_index']:.3f}",
+            "",
         )
         for mr in balanced_sorted
     ]
@@ -515,6 +533,14 @@ def execute_ranking(state: AgentState, config: RunnableConfig) -> dict:
         ]
     else:
         benchmark_weights = state.get("weighted_benchmarks", [])
+
+    # Normalize weights to sum to 1.0 so they act as fractional importance shares.
+    total_weight = sum(bw.get("weight", 0.0) for bw in benchmark_weights)
+    if total_weight > 0:
+        benchmark_weights = [
+            {**bw, "weight": bw.get("weight", 0.0) / total_weight}
+            for bw in benchmark_weights
+        ]
 
     logger.debug(
         "execute_ranking ENTRY | benchmark_weights=%d | constraints=%s | token_ratio_keys=%s",
