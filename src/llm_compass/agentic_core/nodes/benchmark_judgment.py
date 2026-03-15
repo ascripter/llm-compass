@@ -48,9 +48,7 @@ Output rules:
 - If a benchmark is not relevant, say why briefly."""
 
 
-def benchmark_judgment_node(
-    state: AgentState, _config: RunnableConfig, *, settings: Settings
-) -> dict:
+def benchmark_judgment_node(state: AgentState, *, settings: Settings) -> dict:
     """
     Node 3(b): LLM judges each candidate benchmark's relevance to the user task.
     Reads weighted_benchmarks from state (output of benchmark_discovery_node).
@@ -73,11 +71,12 @@ def benchmark_judgment_node(
     modality_lines = ""
     if intent is not None:
         modality_lines = (
-            f"\nInput modalities: {intent.intended_input_modalities}"
-            f"\nOutput modalities: {intent.intended_output_modalities}"
+            f"\nInput modalities: {', '.join(intent.intended_input_modalities)}"
+            f"\nOutput modalities: {', '.join(intent.intended_output_modalities)}"
         )
 
     # Format each benchmark as a readable block for the LLM
+    weighted_benchmarks.sort(key=lambda x: x["score"])
     benchmark_blocks = []
     for bm in weighted_benchmarks:
         variant_str = f" ({bm['variant']})" if bm.get("variant") else ""
@@ -99,7 +98,7 @@ def benchmark_judgment_node(
     structured_llm = llm.with_structured_output(BenchmarkJudgments)
 
     logger.debug(
-        "benchmark_judgment_node ENTRY | benchmarks=%d | human_message=\n%r",
+        "benchmark_judgment_node ENTRY | benchmarks=%d | human_message=\n%s",
         len(weighted_benchmarks),
         human_content,
     )

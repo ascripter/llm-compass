@@ -29,8 +29,10 @@ def _system_prompt(chat_history: list[AnyMessage]):
     if len(chat_history) == 1:
         intro = "Given the original user query"
     else:
-        intro = ("Given the original user query in the first message "
-        "and the consecutive clarification chat")
+        intro = (
+            "Given the original user query in the first message "
+            "and the consecutive clarification chat"
+        )
     return f"""You are a token volume estimation assistant in an AI routing pipeline.
 
 {intro}:
@@ -39,7 +41,8 @@ def _system_prompt(chat_history: list[AnyMessage]):
 3. Follow the output schema strictly.
 """
 
-def token_ratio_estimation_node(state: AgentState, settings: Settings) -> dict[str, Any]:
+
+def token_ratio_estimation_node(state: AgentState, *, settings: Settings) -> dict[str, Any]:
     llm = settings.make_llm("openai/gpt-4o-mini", temperature=0)
     token_estimator = llm.with_structured_output(TokenRatioEstimation)
 
