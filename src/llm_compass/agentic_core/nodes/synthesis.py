@@ -17,6 +17,7 @@ from ..schemas.synthesis import (
     Citation,
     ComparisonTable,
     RecommendationCard,
+    RecommendationReasons,
     SynthesisLLMOutput,
     SynthesisOutput,
     Warning,
@@ -171,7 +172,7 @@ def _generate_warnings(state: dict[str, Any], ranked: RankedLists) -> list[Warni
 
 def _pick_recommendation_cards(
     ranked: RankedLists,
-    llm_reasons: Dict[str, str] | None = None,
+    llm_reasons: RecommendationReasons | None = None,
 ) -> list[RecommendationCard]:
     """Top-1 from each list, collapsing duplicates.
 
@@ -194,9 +195,8 @@ def _pick_recommendation_cards(
             continue
         seen.add(m.model_id)
         reason = (
-            (llm_reasons or {}).get(key)
-            or m.reason_for_ranking
-        )
+            getattr(llm_reasons, key, None) if llm_reasons else None
+        ) or m.reason_for_ranking
         cards.append(
             RecommendationCard(
                 category=label,
@@ -382,7 +382,8 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
                 " | reasons_keys=%s | calibration_note=%s",
                 len(llm_output.task_summary),
                 len(llm_output.executive_summary),
-                list(llm_output.recommendation_reasons.keys()),
+                [k for k in ("top_performance", "balanced", "budget")
+                 if getattr(llm_output.recommendation_reasons, k, None)],
                 llm_output.offset_calibration_note is not None,
             )
             logs.append("Synthesis: LLM generated summary.")

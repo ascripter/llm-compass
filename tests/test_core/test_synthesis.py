@@ -24,6 +24,7 @@ from llm_compass.agentic_core.schemas.ranking import (
 from llm_compass.agentic_core.schemas.synthesis import (
     Citation,
     RecommendationCard,
+    RecommendationReasons,
     SynthesisLLMOutput,
     SynthesisOutput,
 )
@@ -411,7 +412,7 @@ class TestPickRecommendationCards:
 
     def test_uses_llm_reasons_when_provided(self):
         m = _make_ranked_model(model_id=1, reason="generic reason")
-        llm_reasons = {"top_performance": "LLM-generated reason"}
+        llm_reasons = RecommendationReasons(top_performance="LLM-generated reason")
         cards = _pick_recommendation_cards(
             _make_ranked_lists(top_performance=[m]),
             llm_reasons=llm_reasons,
@@ -425,10 +426,10 @@ class TestPickRecommendationCards:
 
     def test_falls_back_when_llm_reason_key_missing(self):
         m = _make_ranked_model(model_id=1, reason="rank reason")
-        # llm_reasons has no "top_performance" key
+        # llm_reasons has no "top_performance" value
         cards = _pick_recommendation_cards(
             _make_ranked_lists(top_performance=[m]),
-            llm_reasons={"balanced": "bal reason"},
+            llm_reasons=RecommendationReasons(balanced="bal reason"),
         )
         assert cards[0].reason == "rank reason"
 
