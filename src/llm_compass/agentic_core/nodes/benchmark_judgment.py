@@ -76,7 +76,6 @@ def benchmark_judgment_node(state: AgentState, *, settings: Settings) -> dict:
         )
 
     # Format each benchmark as a readable block for the LLM
-    weighted_benchmarks.sort(key=lambda x: x["score"])
     benchmark_blocks = []
     for bm in weighted_benchmarks:
         variant_str = f" ({bm['variant']})" if bm.get("variant") else ""

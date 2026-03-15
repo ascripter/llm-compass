@@ -268,7 +268,9 @@ def retrieve_and_rank_models(
                 BenchmarkScore.benchmark_id.in_(benchmark_ids),
             )
         )
-        .order_by(BenchmarkScore.date_published.desc().nullslast(), BenchmarkScore.date_ingested.desc())
+        .order_by(
+            BenchmarkScore.date_published.desc().nullslast(), BenchmarkScore.date_ingested.desc()
+        )
         .all()
     )
     # Keep only the most recent score per (model_id, benchmark_id).
@@ -361,7 +363,6 @@ def retrieve_and_rank_models(
 
         if benchmark_results:  # Only include models with at least some benchmark data
             # Step 4: Calculate Blended Cost
-            logger.debug(f"include model: {model.name_normalized}")
             blended_cost, cost_null_fraction = _calculate_blended_cost(
                 model, token_ratio_estimation
             )
@@ -403,8 +404,7 @@ def retrieve_and_rank_models(
 
     # Min/max per benchmark (for 0-1 normalization within each benchmark).
     bm_min_max: Dict[int, Tuple[float, float]] = {
-        bid: (min(scores), max(scores))
-        for bid, scores in bm_scores_across_models.items()
+        bid: (min(scores), max(scores)) for bid, scores in bm_scores_across_models.items()
     }
 
     # Compute per-model performance_index = weighted average of per-benchmark normalized scores.
@@ -455,10 +455,7 @@ def retrieve_and_rank_models(
 
     # Performance List: Ranked by Performance_Index
     perf_sorted = sorted(model_results, key=lambda x: x["performance_index"], reverse=True)
-    top_performance = [
-        _to_ranked_model(mr, mr["performance_index"], "")
-        for mr in perf_sorted
-    ]
+    top_performance = [_to_ranked_model(mr, mr["performance_index"], "") for mr in perf_sorted]
 
     # Budget List: Ranked by 0.2 * Performance_Index + 0.8 * Blended_Cost_Index
     budget_sorted = sorted(
@@ -525,9 +522,15 @@ def execute_ranking(state: AgentState, config: RunnableConfig) -> dict:
     if judgements_raw is not None:
         if isinstance(judgements_raw, dict):
             judgements_raw = BenchmarkJudgments(**judgements_raw)
-        id_to_name = {bm["id"]: bm.get("name_normalized", "") for bm in state.get("weighted_benchmarks", [])}
+        id_to_name = {
+            bm["id"]: bm.get("name_normalized", "") for bm in state.get("weighted_benchmarks", [])
+        }
         benchmark_weights = [
-            {"id": j.benchmark_id, "weight": j.relevance_weight, "name": id_to_name.get(j.benchmark_id, "")}
+            {
+                "id": j.benchmark_id,
+                "weight": j.relevance_weight,
+                "name": id_to_name.get(j.benchmark_id, ""),
+            }
             for j in judgements_raw.judgments
             if j.relevance_weight > 0.0
         ]
@@ -538,8 +541,7 @@ def execute_ranking(state: AgentState, config: RunnableConfig) -> dict:
     total_weight = sum(bw.get("weight", 0.0) for bw in benchmark_weights)
     if total_weight > 0:
         benchmark_weights = [
-            {**bw, "weight": bw.get("weight", 0.0) / total_weight}
-            for bw in benchmark_weights
+            {**bw, "weight": bw.get("weight", 0.0) / total_weight} for bw in benchmark_weights
         ]
 
     logger.debug(

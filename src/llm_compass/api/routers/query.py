@@ -117,12 +117,12 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
     if weighted_benchmarks:
         avg_sim = state.get("average_benchmark_similarity") or 0.0
         header = f"\n## Discovered Benchmarks\nAverage relevance: {avg_sim:.2f}  ·  {len(weighted_benchmarks)} benchmark(s) matched\n"
-        rows = ["| Benchmark | Variant | Weight |", "|---|---|---|"]
+        rows = ["| Benchmark | Variant | Score |", "|---|---|---|"]
         for b in weighted_benchmarks:
-            name = b.get("name") or b.get("name_normalized") or b.get("id", "?")
+            name = b.get("name_normalized") or b.get("id", "?")
             variant = b.get("variant") or "—"
-            weight = b.get("weight", 0.0)
-            rows.append(f"| {name} | {variant} | {weight:.3f} |")
+            score = f"{b['score']:.3f}" if "score" in b else "N/A"
+            rows.append(f"| {name} | {variant} | {score} |")
         parts.append(header + "\n".join(rows))
 
     judgements_raw = state.get("benchmark_judgements")
@@ -162,50 +162,52 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
         ranked_results = ranked_raw.model_dump()
     else:
         ranked_results = ranked_raw or {}
-    categories = [
-        ("top_performance", "Top Performance"),
-        ("balanced", "Balanced"),
-        ("budget", "Budget"),
-    ]
-    ranking_parts: list[str] = []
-    for key, label in categories:
-        models = ranked_results.get(key) or []
-        if not models:
-            continue
-        ranking_parts.append(f"**{label}** ({len(models)} models)")
-        for i, m in enumerate(models, 1):
+    perf_list = ranked_results.get("top_performance") or []
+    bal_list = ranked_results.get("balanced") or []
+    bud_list = ranked_results.get("budget") or []
+
+    if perf_list or bal_list or bud_list:
+
+        def _key(m: dict) -> str:
+            return m.get("name_normalized") or str(m.get("model_id", "?"))
+
+        bal_scores = {
+            _key(m): (m.get("rank_metrics") or {}).get("blended_score", 0.0) for m in bal_list
+        }
+        bud_scores = {
+            _key(m): (m.get("rank_metrics") or {}).get("blended_score", 0.0) for m in bud_list
+        }
+
+        # Base ordering: top_performance list; append any models only in bal/bud at the end
+        seen: set[str] = set()
+        ordered: list[dict] = []
+        for m in perf_list:
+            seen.add(_key(m))
+            ordered.append(m)
+        for m in bal_list + bud_list:
+            if _key(m) not in seen:
+                seen.add(_key(m))
+                ordered.append(m)
+
+        rows = [
+            "| # | Model | perf_idx | cost_idx | bal_score | bud_score |",
+            "|---|---|---|---|---|---|",
+        ]
+        for i, m in enumerate(ordered, 1):
+            key = _key(m)
             rm = m.get("rank_metrics") or {}
-            blended = rm.get("blended_score", 0.0)
             perf_idx = rm.get("performance_index", 0.0)
             cost_idx = rm.get("blended_cost_index", 0.0)
-            name = m.get("name_normalized") or m.get("model_id", "?")
-            provider = m.get("provider", "")
-            provider_str = f" ({provider})" if provider else ""
-            speed = m.get("speed_class") or ""
-            speed_str = f" · {speed}" if speed else ""
             cost_null = m.get("cost_null_fraction") or 0.0
-            cost_null_str = f" · ⚠ cost data {cost_null*100:.0f}% missing" if cost_null > 0 else ""
-            reason = m.get("reason_for_ranking", "")
-            ranking_parts.append(
-                f"{i}. **{name}**{provider_str}{speed_str} — "
-                f"blended: {blended:.3f}  perf: {perf_idx:.3f}  cost_idx: {cost_idx:.3f}{cost_null_str}"
+            cost_null_str = " ⚠" if cost_null > 0 else ""
+            bal = bal_scores.get(key)
+            bud = bud_scores.get(key)
+            bal_str = f"{bal:.3f}" if bal is not None else "—"
+            bud_str = f"{bud:.3f}" if bud is not None else "—"
+            rows.append(
+                f"| {i} | {key} | {perf_idx:.3f} | {cost_idx:.3f}{cost_null_str} | {bal_str} | {bud_str} |"
             )
-            if reason:
-                ranking_parts.append(f"   _{reason}_")
-            bm_results = m.get("benchmark_results") or []
-            for br in bm_results:
-                bm_name = br.get("benchmark_name", "?")
-                variant = br.get("benchmark_variant") or ""
-                variant_str = f" ({variant})" if variant else ""
-                score = br.get("score", 0.0)
-                unit = br.get("metric_unit", "")
-                weight = br.get("weight_used", 0.0)
-                estimated = " *(est.)*" if br.get("is_estimated") else ""
-                ranking_parts.append(
-                    f"   - {bm_name}{variant_str}: {score:.1f}{unit}  w={weight:.3f}{estimated}"
-                )
-    if ranking_parts:
-        parts.append("\n## Ranking Results\n\n" + "\n".join(ranking_parts))
+        parts.append("\n## Ranking Results\n\n" + "\n".join(rows))
 
     if not parts:
         parts.append("Analysis complete. Ranking and recommendations are not yet available.")
