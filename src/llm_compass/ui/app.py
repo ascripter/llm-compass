@@ -207,7 +207,22 @@ def main() -> None:
 
     sidebar_constraints = sidebar.render_sidebar()
     settings = get_settings()
-    prompt = chat.render_chat(sidebar_constraints, debug=settings.debug_output)
+    prompt, start_over = chat.render_chat(
+        sidebar_constraints,
+        debug=settings.debug_output,
+        status=st.session_state.status,
+        display=st.session_state.display,
+    )
+
+    # Handle "Start Over" — clear all state except sidebar filters, then rerun
+    if start_over:
+        st.session_state.messages = []
+        st.session_state.trace_runs = []
+        st.session_state.display = None
+        st.session_state.session_id = None
+        st.session_state.status = None
+        st.session_state.pending_query = None
+        st.rerun()
 
     # Step 1: new submission — save message and rerun immediately so it appears in chat
     if prompt:
