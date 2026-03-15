@@ -7,9 +7,6 @@ from .common import ErrorDetail
 from llm_compass.agentic_core.schemas.ranking import RankedLists
 from llm_compass.agentic_core.schemas.synthesis import SynthesisOutput
 
-# Backward-compatible alias for the API layer
-UIComponents = SynthesisOutput
-
 
 class QueryRequest(BaseModel):
     """Primary request body for the /query endpoint."""
@@ -56,5 +53,6 @@ class QueryResponse(BaseModel):
     clarification_question: Optional[str] = None
     traceability: Dict[str, List[TraceEvent]] = {"events": []}
     ranked_data: Optional[RankedLists] = None
-    ui_components: Optional[UIComponents] = None
+    ui_components: Optional[SynthesisOutput] = None
+    debug_summary: Optional[str] = None
     errors: List[ErrorDetail] = []

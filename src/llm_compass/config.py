@@ -76,6 +76,7 @@ class Settings:
     log_console_level_dev: str
     log_file_level_test: str
     log_console_level_test: str
+    debug_output: bool
 
     @classmethod
     def from_env(
@@ -114,6 +115,9 @@ class Settings:
         if create_log_dir:
             log_path.mkdir(parents=True, exist_ok=True)
 
+        _false = ("f", "false", "0", "n", "no")
+        debug_output = source.get("LLM_COMPASS_DEBUG_OUTPUT", "false").lower() not in _false
+
         return cls(
             project_root=project_root or Path(__file__).absolute().parent,
             repo_root=repo_root or Path(__file__).absolute().parent.parent.parent,
@@ -129,6 +133,7 @@ class Settings:
             log_console_level_dev=log_console_level_dev,
             log_file_level_test=log_file_level_test,
             log_console_level_test=log_console_level_test,
+            debug_output=debug_output,
         )
 
     def get_benchmark_description_csv(self) -> Path:

@@ -20,7 +20,6 @@ from ..schemas.query import (
     QueryResponse,
     StreamEvent,
     TraceEvent,
-    UIComponents,
 )
 
 logger = logging.getLogger(__name__)
@@ -258,15 +257,10 @@ def _build_response(session_id: str, state: dict[str, Any]) -> QueryResponse:
     if status == "needs_clarification":
         clarification_question = _extract_clarification_question(state)
 
-    # Prefer SynthesisOutput from final_response; fall back to intermediate summary
+    # ui_components carries synthesis output only; intermediate summary goes to debug_summary
     final = state.get("final_response")
-    if isinstance(final, SynthesisOutput):
-        ui_components = final
-    elif status == "ok":
-        summary = _build_intermediate_summary(state)
-        ui_components = UIComponents(summary_markdown=summary)
-    else:
-        ui_components = None
+    ui_components = final if isinstance(final, SynthesisOutput) else None
+    debug_summary = _build_intermediate_summary(state) if status == "ok" else None
 
     return QueryResponse(
         session_id=session_id,
@@ -279,6 +273,7 @@ def _build_response(session_id: str, state: dict[str, Any]) -> QueryResponse:
         traceability=_build_traceability(state),
         ranked_data=_parse_ranked_results(state.get("ranked_results")),
         ui_components=ui_components,
+        debug_summary=debug_summary,
         errors=errors,
     )
 
