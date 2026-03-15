@@ -73,7 +73,7 @@ def _run_query(user_query: str, sidebar_constraints: dict) -> None:
         q = display["clarification_question"] or "Could you clarify?"
         st.session_state.messages.append({"role": "assistant", "content": q})
     else:
-        summary = display.get("summary_markdown") or "Results ready."
+        summary = display.get("summary_markdown") or "Query processed — see the Results panel."
         st.session_state.messages.append({"role": "assistant", "content": summary})
 
 
@@ -98,7 +98,7 @@ def _run_clarify(user_reply: str, sidebar_constraints: dict) -> None:
         q = display["clarification_question"] or "Could you clarify further?"
         st.session_state.messages.append({"role": "assistant", "content": q})
     else:
-        summary = display.get("summary_markdown") or "Results ready."
+        summary = display.get("summary_markdown") or "Query processed — see the Results panel."
         st.session_state.messages.append({"role": "assistant", "content": summary})
 
 

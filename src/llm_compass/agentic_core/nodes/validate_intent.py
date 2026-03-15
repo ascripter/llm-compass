@@ -52,7 +52,7 @@ A request is UNSPECIFIC if the core task is still too vague, too broad, or too a
 
 ## Decision rule
 Set is_specific = true when:
-- The core task/action is clear.
+- The core task/action is clear enough to retrieve plausible benchmark families.
 - At least one plausible input modality can be identified from the request or normal task defaults.
 - At least one plausible output modality can be identified from the request or normal task defaults.
 - The request is narrow enough that relevant benchmark descriptions could plausibly be retrieved.
@@ -75,7 +75,7 @@ Do NOT mark a request as unspecific only because the user omitted an obvious def
 
 ## Clarification scope
 If clarification is needed, ask only about:
-- the actual use case or task
+- the actual use case or task ONLY when it is NOT clear enough to retrieve plausible benchmark families
 - missing input modalities: {MODALITY_VALUES}
 - missing output modalities: {MODALITY_VALUES}
 
@@ -88,6 +88,7 @@ You MUST NOT ask about or mention:
 - model names or providers
 - specific output formatting
 - whether the user will provide input as files or via a link
+- domain subtype, sections, length, or format of the user task.
 
 ## Output rules
 - Be conservative in asking clarifying questions.
@@ -97,7 +98,7 @@ You MUST NOT ask about or mention:
 - Return only data that matches the schema."""
 
 
-def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any]:
+def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, Any]:
     """
     Validates user intent and UI constraint consistency (Req 2.3 Node 1).
 
@@ -130,7 +131,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
     )
 
     # patch: use 4o-mini since gpt-oss-120b doesn't adhere to schema consistently
-    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0)
+    llm = settings.make_llm("openai/gpt-5-mini", temperature=0)
     structured_llm = llm.with_structured_output(IntentExtraction)
     messages = [SystemMessage(INTENT_VALIDATOR_SYSTEM_PROMPT)] + state["messages"]  # type:ignore
     response: IntentExtraction = structured_llm.invoke(messages)  # type: ignore
@@ -204,7 +205,8 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
             msg += f"- input: {response.intended_input_modalities}\n"
             msg += f"- output: {response.intended_output_modalities}\n\n"
             msg += "This conflicts with your selection in the UI. Please change *either* the UI "
-            msg += "filters or clarify which input and output modalities you intend to use."
+            msg += "filters or clarify which input and output modalities you intend to use.\n"
+            msg += "UI filters will take precedence and determine the recommendations you get."
             logs.append(
                 (
                     "Intent Validator: Modality-mismatch.\nMissing UI input: "
@@ -214,7 +216,7 @@ def validate_intent_node(state: AgentState, settings: Settings) -> dict[str, Any
             )
             state_update["ui_mismatch_hinted"] = True
             response.is_specific = False  # patch it to trigger iteration of node
-        else:
+        elif ui_mismatch:
             # consecutive ui mismatch -> only soft hint
             msg += "I've mentioned that already, but want to make sure your modality filter "
             msg += "is set correctly.\nYour task description currently indicates the following "

@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
 from llm_compass.agentic_core.graph import get_graph
+from llm_compass.agentic_core.schemas.benchmark_judgment import BenchmarkJudgments
 from llm_compass.agentic_core.schemas.ranking import RankedLists
 from llm_compass.agentic_core.schemas.synthesis import SynthesisOutput
 from llm_compass.agentic_core.state import get_initial_state, AgentState
@@ -19,7 +20,6 @@ from ..schemas.query import (
     QueryResponse,
     StreamEvent,
     TraceEvent,
-    UIComponents,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,42 +117,97 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
     if weighted_benchmarks:
         avg_sim = state.get("average_benchmark_similarity") or 0.0
         header = f"\n## Discovered Benchmarks\nAverage relevance: {avg_sim:.2f}  ·  {len(weighted_benchmarks)} benchmark(s) matched\n"
-        rows = ["| Benchmark | Variant | Weight |", "|---|---|---|"]
+        rows = ["| Benchmark | Variant | Score |", "|---|---|---|"]
         for b in weighted_benchmarks:
-            name = b.get("name") or b.get("name_normalized") or b.get("id", "?")
+            name = b.get("name_normalized") or b.get("id", "?")
             variant = b.get("variant") or "—"
-            weight = b.get("weight", 0.0)
-            rows.append(f"| {name} | {variant} | {weight:.3f} |")
+            score = f"{b['score']:.3f}" if "score" in b else "N/A"
+            rows.append(f"| {name} | {variant} | {score} |")
         parts.append(header + "\n".join(rows))
+
+    judgements_raw = state.get("benchmark_judgements")
+    if judgements_raw is not None:
+        if isinstance(judgements_raw, BenchmarkJudgments):
+            judgements = judgements_raw
+        elif isinstance(judgements_raw, dict):
+            try:
+                judgements = BenchmarkJudgments.model_validate(judgements_raw)
+            except Exception:
+                judgements = None
+        else:
+            judgements = None
+
+        if judgements is not None:
+            relevant = [j for j in judgements.judgments if j.relevance_weight > 0.0]
+            if relevant:
+                # Build id -> display name lookup from weighted_benchmarks
+                bm_lookup: dict[int, str] = {}
+                for b in weighted_benchmarks:
+                    bid = b.get("id")
+                    if bid is not None:
+                        bm_name = b.get("name_normalized") or b.get("name") or str(bid)
+                        variant = b.get("variant")
+                        bm_lookup[int(bid)] = f"{bm_name} ({variant})" if variant else bm_name
+
+                rows = ["| Benchmark | Relevance | Weight | Rationale |", "|---|---|---|---|"]
+                for j in relevant:
+                    display = bm_lookup.get(j.benchmark_id, str(j.benchmark_id))
+                    rows.append(
+                        f"| {display} | {j.relevance_class} | {j.relevance_weight:.2f} | {j.short_rationale} |"
+                    )
+                parts.append("\n## Benchmark Judgments\n" + "\n".join(rows))
 
     ranked_raw = state.get("ranked_results")
     if isinstance(ranked_raw, RankedLists):
         ranked_results = ranked_raw.model_dump()
     else:
         ranked_results = ranked_raw or {}
-    categories = [
-        ("top_performance", "Top Performance"),
-        ("balanced", "Balanced"),
-        ("budget", "Budget"),
-    ]
-    ranking_parts: list[str] = []
-    for key, label in categories:
-        models = ranked_results.get(key) or []
-        if not models:
-            continue
-        ranking_parts.append(f"**{label}**")
-        for i, m in enumerate(models[:3], 1):
+    perf_list = ranked_results.get("top_performance") or []
+    bal_list = ranked_results.get("balanced") or []
+    bud_list = ranked_results.get("budget") or []
+
+    if perf_list or bal_list or bud_list:
+
+        def _key(m: dict) -> str:
+            return m.get("name_normalized") or str(m.get("model_id", "?"))
+
+        bal_scores = {
+            _key(m): (m.get("rank_metrics") or {}).get("blended_score", 0.0) for m in bal_list
+        }
+        bud_scores = {
+            _key(m): (m.get("rank_metrics") or {}).get("blended_score", 0.0) for m in bud_list
+        }
+
+        # Base ordering: top_performance list; append any models only in bal/bud at the end
+        seen: set[str] = set()
+        ordered: list[dict] = []
+        for m in perf_list:
+            seen.add(_key(m))
+            ordered.append(m)
+        for m in bal_list + bud_list:
+            if _key(m) not in seen:
+                seen.add(_key(m))
+                ordered.append(m)
+
+        rows = [
+            "| # | Model | perf_idx | cost_idx | bal_score | bud_score |",
+            "|---|---|---|---|---|---|",
+        ]
+        for i, m in enumerate(ordered, 1):
+            key = _key(m)
             rm = m.get("rank_metrics") or {}
-            blended = rm.get("blended_score", 0.0)
-            name = m.get("name_normalized") or m.get("model_id", "?")
-            provider = m.get("provider", "")
-            provider_str = f" ({provider})" if provider else ""
-            reason = m.get("reason_for_ranking", "")
-            ranking_parts.append(f"{i}. **{name}**{provider_str} — blended score: {blended:.3f}")
-            if reason:
-                ranking_parts.append(f"   _{reason}_")
-    if ranking_parts:
-        parts.append("\n## Ranking Results\n\n" + "\n".join(ranking_parts))
+            perf_idx = rm.get("performance_index", 0.0)
+            cost_idx = rm.get("blended_cost_index", 0.0)
+            cost_null = m.get("cost_null_fraction") or 0.0
+            cost_null_str = " ⚠" if cost_null > 0 else ""
+            bal = bal_scores.get(key)
+            bud = bud_scores.get(key)
+            bal_str = f"{bal:.3f}" if bal is not None else "—"
+            bud_str = f"{bud:.3f}" if bud is not None else "—"
+            rows.append(
+                f"| {i} | {key} | {perf_idx:.3f} | {cost_idx:.3f}{cost_null_str} | {bal_str} | {bud_str} |"
+            )
+        parts.append("\n## Ranking Results\n\n" + "\n".join(rows))
 
     if not parts:
         parts.append("Analysis complete. Ranking and recommendations are not yet available.")
@@ -204,15 +259,10 @@ def _build_response(session_id: str, state: dict[str, Any]) -> QueryResponse:
     if status == "needs_clarification":
         clarification_question = _extract_clarification_question(state)
 
-    # Prefer SynthesisOutput from final_response; fall back to intermediate summary
+    # ui_components carries synthesis output only; intermediate summary goes to debug_summary
     final = state.get("final_response")
-    if isinstance(final, SynthesisOutput):
-        ui_components = final
-    elif status == "ok":
-        summary = _build_intermediate_summary(state)
-        ui_components = UIComponents(summary_markdown=summary)
-    else:
-        ui_components = None
+    ui_components = final if isinstance(final, SynthesisOutput) else None
+    debug_summary = _build_intermediate_summary(state) if status == "ok" else None
 
     return QueryResponse(
         session_id=session_id,
@@ -225,6 +275,7 @@ def _build_response(session_id: str, state: dict[str, Any]) -> QueryResponse:
         traceability=_build_traceability(state),
         ranked_data=_parse_ranked_results(state.get("ranked_results")),
         ui_components=ui_components,
+        debug_summary=debug_summary,
         errors=errors,
     )
 
@@ -288,6 +339,7 @@ _NODE_LABELS = {
     "token_ratio": "Estimating token ratios",
     "refiner": "Generating search queries",
     "benchmark_discovery": "Discovering benchmarks",
+    "benchmark_judgment": "Judging benchmark relevance",
     "ranking": "Ranking models",
     "synthesis": "Synthesizing response",
 }

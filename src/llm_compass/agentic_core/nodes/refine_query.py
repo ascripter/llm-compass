@@ -59,7 +59,7 @@ def _ensure_query_count(search_queries: list[str], user_query: str) -> tuple[lis
     return unique[:5], used_fallback
 
 
-def query_refiner_node(state: AgentState, settings: Settings) -> dict[str, Any]:
+def query_refiner_node(state: AgentState, *, settings: Settings) -> dict[str, Any]:
     """
     Refines a validated query (Req 2.3 Node 2).
 

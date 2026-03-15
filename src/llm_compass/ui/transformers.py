@@ -39,6 +39,7 @@ def response_to_display(api_response: dict[str, Any]) -> dict[str, Any]:
         "status": api_response.get("status", "ok"),
         "clarification_question": api_response.get("clarification_question"),
         "trace_messages": [e.get("message", "") for e in events if isinstance(e, dict)],
+        "debug_summary": api_response.get("debug_summary"),
         "summary_markdown": ui.get("summary_markdown"),
         "comparison_table": ui.get("comparison_table"),
         "recommendation_cards": ui.get("recommendation_cards", []),

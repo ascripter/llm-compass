@@ -1,6 +1,8 @@
 import pandas as pd
 import streamlit as st
 
+from llm_compass.config import get_settings
+
 
 def render_results(display: dict | None) -> None:
     st.subheader("Results")
@@ -8,6 +10,14 @@ def render_results(display: dict | None) -> None:
     if display is None:
         st.info("Run a query to see benchmark results.")
         return
+
+    settings = get_settings()
+
+    # Debug report (intermediate pipeline summary)
+    debug_summary = display.get("debug_summary")
+    if debug_summary and settings.debug_output:
+        with st.expander("Debug Report", expanded=True):
+            st.markdown(debug_summary)
 
     # Warnings
     for w in display.get("warnings", []):

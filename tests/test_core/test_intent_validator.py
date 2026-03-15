@@ -370,6 +370,7 @@ _QUERIES_VAGUE_MODALITIES = [
 # Explicit/specific queries (~10) across all modalities
 _QUERIES_EXPLICIT = [
     # text→text
+    "Medical report summary",
     "Translate English customer support emails to French and return the translated text",
     "Extract named entities (people, places, dates) from legal contracts in plain text",
     # image→text
@@ -387,6 +388,7 @@ _QUERIES_EXPLICIT = [
     "Write summaries from uploaded educational video lectures",
 ]
 _QUERIES_EXPLICIT_MODALITIES = [
+    (["text"], ["text"]),
     (["text"], ["text"]),
     (["text"], ["text"]),
     (["image"], ["text"]),
