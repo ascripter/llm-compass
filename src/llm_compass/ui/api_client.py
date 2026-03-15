@@ -49,6 +49,23 @@ def post_query_stream(user_query: str, constraints: dict) -> Generator[dict, Non
                     yield json.loads(line)
 
 
+def post_clarify_stream(session_id: str, user_reply: str, constraints: dict) -> Generator[dict, None, None]:
+    """POST /api/v1/query/{session_id}/clarify/stream — stream clarification as NDJSON."""
+    payload = {"user_reply": user_reply, "constraints": constraints}
+    logger.debug("post_clarify_stream REQUEST | session_id=%s | user_reply=%r", session_id, user_reply)
+    with httpx.Client(timeout=_TIMEOUT) as client:
+        with client.stream(
+            "POST",
+            f"{_API_URL}/api/v1/query/{session_id}/clarify/stream",
+            json=payload,
+            headers=_HEADERS,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if line.strip():
+                    yield json.loads(line)
+
+
 def post_clarify(session_id: str, user_reply: str, constraints: dict) -> dict:
     """POST /api/v1/query/{session_id}/clarify — send clarification."""
     payload = {"user_reply": user_reply, "constraints": constraints}

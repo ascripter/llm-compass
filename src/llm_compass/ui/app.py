@@ -23,7 +23,8 @@ def _init_logging():
 def _init_session_state() -> None:
     defaults = {
         "messages": [],
-        "trace_messages": [],
+        "trace_runs": [],      # list of {"label": str, "steps": list[dict], "messages": list[str]}
+        "pending_query": None, # {"text": str, "mode": "query"|"clarify"} set before fast rerun
         "display": None,
         "session_id": None,
         "status": None,
@@ -33,38 +34,87 @@ def _init_session_state() -> None:
             st.session_state[key] = val
 
 
-def _run_query(user_query: str, sidebar_constraints: dict) -> None:
-    constraints = transformers.sidebar_to_constraints(sidebar_constraints)
+def _run_stream_loop(event_stream, tracker_ph) -> tuple[dict | None, list[dict]]:
+    """Drive a node-event stream, updating tracker_ph live.
 
-    with st.status("Analyzing your query...", expanded=True) as status_ui:
-        try:
-            raw = None
-            for event in api_client.post_query_stream(user_query, constraints):
-                etype = event.get("event")
-                if etype == "node_complete":
-                    msg = event.get("message", event.get("node", ""))
-                    status_ui.update(label=f"{msg}...")
-                    st.write(f"Done: {msg}")
-                elif etype == "complete":
-                    raw = event.get("data")
-                    status_ui.update(label="Complete!", state="complete")
-                elif etype == "error":
-                    status_ui.update(label="Error", state="error")
-                    st.error(event.get("message", "Unknown error"))
-                    return
-        except Exception as exc:
-            st.error(f"API error: {exc}")
-            return
+    Returns (raw_response_dict, final_steps).  raw is None on error.
+    """
+    steps = traceability.init_steps()
+    with tracker_ph.container():
+        traceability.render_live_tracker(steps, is_complete=False)
+
+    raw = None
+    for event in event_stream:
+        etype = event.get("event")
+        if etype == "node_complete":
+            msg = event.get("message", "")
+            matched = False
+            for i, step in enumerate(steps):
+                if step["status"] == "running" or step["name"] == msg:
+                    step["status"] = "done"
+                    if i + 1 < len(steps):
+                        steps[i + 1]["status"] = "running"
+                    matched = True
+                    break
+            if not matched:
+                steps.append({"name": msg, "status": "done"})
+            with tracker_ph.container():
+                traceability.render_live_tracker(steps, is_complete=False)
+        elif etype == "complete":
+            raw = event.get("data")
+            for step in steps:
+                if step["status"] not in ("done", "failed"):
+                    step["status"] = "done"
+            with tracker_ph.container():
+                traceability.render_live_tracker(steps, is_complete=True)
+        elif etype == "error":
+            for step in steps:
+                if step["status"] == "running":
+                    step["status"] = "failed"
+                    break
+            with tracker_ph.container():
+                traceability.render_live_tracker(steps, is_complete=True)
+            st.error(event.get("message", "Unknown error"))
+            return None, steps
+
+    return raw, steps
+
+
+def _apply_clarification_failure(steps: list[dict], tracker_ph) -> None:
+    """If the graph requested clarification, mark 'Analyzing intent' as failed."""
+    for step in steps:
+        if step["name"] == "Analyzing intent":
+            step["status"] = "failed"
+            break
+    with tracker_ph.container():
+        traceability.render_live_tracker(steps, is_complete=True)
+
+
+def _run_query(user_query: str, sidebar_constraints: dict, tracker_ph) -> None:
+    constraints = transformers.sidebar_to_constraints(sidebar_constraints)
+    try:
+        raw, steps = _run_stream_loop(
+            api_client.post_query_stream(user_query, constraints),
+            tracker_ph,
+        )
+    except Exception as exc:
+        st.error(f"API error: {exc}")
+        return
 
     if raw is None:
         st.error("Stream ended without a response")
         return
 
+    if raw.get("status") == "needs_clarification":
+        _apply_clarification_failure(steps, tracker_ph)
+
     display = transformers.response_to_display(raw)
+    label = f"Query {len(st.session_state.trace_runs) + 1}"
+    new_run = {"label": label, "steps": steps, "messages": display["trace_messages"]}
+    st.session_state.trace_runs = [new_run]  # reset for new top-level query
     st.session_state.display = display
     st.session_state.session_id = display["session_id"]
     st.session_state.status = display["status"]
-    st.session_state.trace_messages = display["trace_messages"]
 
     if display["status"] == "error":
         msgs = "; ".join(e.get("message", "") for e in display["errors"])
@@ -77,22 +127,34 @@ def _run_query(user_query: str, sidebar_constraints: dict) -> None:
         st.session_state.messages.append({"role": "assistant", "content": summary})
 
 
-def _run_clarify(user_reply: str, sidebar_constraints: dict) -> None:
+def _run_clarify(user_reply: str, sidebar_constraints: dict, tracker_ph) -> None:
     session_id = st.session_state.session_id
     if not session_id:
         st.error("No active session to clarify.")
         return
     constraints = transformers.sidebar_to_constraints(sidebar_constraints)
     try:
-        raw = api_client.post_clarify(session_id, user_reply, constraints)
+        raw, steps = _run_stream_loop(
+            api_client.post_clarify_stream(session_id, user_reply, constraints),
+            tracker_ph,
+        )
     except Exception as exc:
         st.error(f"API error: {exc}")
         return
 
+    if raw is None:
+        st.error("Stream ended without a response")
+        return
+
+    if raw.get("status") == "needs_clarification":
+        _apply_clarification_failure(steps, tracker_ph)
+
     display = transformers.response_to_display(raw)
+    label = f"Clarification {len(st.session_state.trace_runs)}"
+    new_run = {"label": label, "steps": steps, "messages": display["trace_messages"]}
+    st.session_state.trace_runs = st.session_state.trace_runs + [new_run]  # append
     st.session_state.display = display
     st.session_state.status = display["status"]
-    st.session_state.trace_messages = display["trace_messages"]
 
     if display["status"] == "needs_clarification":
         q = display["clarification_question"] or "Could you clarify further?"
@@ -107,26 +169,30 @@ def main() -> None:
     _init_session_state()
 
     sidebar_constraints = sidebar.render_sidebar()
+    prompt = chat.render_chat(sidebar_constraints)
 
-    col_chat, col_trace = st.columns([2, 1])
+    # Step 1: new submission — save message and rerun immediately so it appears in chat
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        mode = "clarify" if st.session_state.status == "needs_clarification" else "query"
+        st.session_state.pending_query = {"text": prompt, "mode": mode}
+        st.rerun()
 
-    with col_chat:
-        prompt = chat.render_chat(sidebar_constraints)
+    # Step 2: process queued query (user message already visible in chat above)
+    if st.session_state.get("pending_query"):
+        pq = st.session_state.pop("pending_query")
+        tracker_ph = st.empty()  # placeholder position: right after chat, above results
+        tables.render_results(st.session_state.display)  # previous results visible during streaming
+        traceability.render_accumulated_trace(st.session_state.trace_runs)  # previous trace visible
+        if pq["mode"] == "clarify":
+            _run_clarify(pq["text"], sidebar_constraints, tracker_ph)
+        else:
+            _run_query(pq["text"], sidebar_constraints, tracker_ph)
+        st.rerun()
 
-        if prompt:
-            st.session_state.messages.append({"role": "user", "content": prompt})
-
-            if st.session_state.status == "needs_clarification":
-                _run_clarify(prompt, sidebar_constraints)
-            else:
-                _run_query(prompt, sidebar_constraints)
-
-            st.rerun()
-
-        tables.render_results(st.session_state.display)
-
-    with col_trace:
-        traceability.render_traceability()
+    # Idle state: results above trace
+    tables.render_results(st.session_state.display)
+    traceability.render_accumulated_trace(st.session_state.trace_runs)
 
 
 main()

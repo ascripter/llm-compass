@@ -385,6 +385,31 @@ async def _stream_graph(session_id: str, initial_state: dict, config: dict) -> A
     yield json.dumps(complete.model_dump()) + "\n"
 
 
+@router.post("/query/{session_id}/clarify/stream")
+async def clarify_query_stream(
+    session_id: str,
+    req: ClarifyRequest,
+    _: str = Depends(require_api_key),
+    db: object | None = Depends(get_db),
+) -> StreamingResponse:
+    prev_state = _sessions.get(session_id)
+    if not prev_state:
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "Session not found"}
+        )
+
+    prev_state["constraints"] = req.constraints.model_dump()
+    msgs = list(prev_state.get("messages", []))
+    msgs.append(HumanMessage(req.user_reply))
+    prev_state["messages"] = msgs
+
+    config = {"configurable": {"thread_id": session_id, "session": db}}
+    return StreamingResponse(
+        _stream_graph(session_id, prev_state, config),
+        media_type="application/x-ndjson",
+    )
+
+
 @router.post("/query/stream")
 async def create_query_stream(
     req: QueryRequest,
