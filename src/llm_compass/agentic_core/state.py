@@ -10,9 +10,13 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph import MessagesState  # implies `messages` attribute
 from langgraph.graph.message import add_messages
 
-from .schemas import IntentExtraction, TokenRatioEstimation
-from .schemas.ranking import RankedLists
-from .schemas.synthesis import SynthesisOutput
+from .schemas import (
+    IntentExtraction,
+    TokenRatioEstimation,
+    BenchmarkJudgments,
+    RankedLists,
+    SynthesisOutput,
+)
 from ..common.schemas import Constraints
 from ..common.types import Modality
 
@@ -31,9 +35,10 @@ class AgentState(MessagesState):
     token_ratio_estimation: Optional[TokenRatioEstimation]
     search_queries: List[str]
 
-    # From Benchmark Discovery (Req 2.3 Node 3)
+    # From Benchmark Discovery and weighting (Req 2.3 Node 3 a and b)
     weighted_benchmarks: List[Dict[str, Any]]
     average_benchmark_similarity: float  # how well do the benchmarks fit in general
+    benchmark_judgements: BenchmarkJudgments
 
     # From Scoring and Ranking (Req 2.3 Node 4)
     ranked_results: Optional[RankedLists]

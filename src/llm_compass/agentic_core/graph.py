@@ -12,6 +12,7 @@ from .nodes import (
     token_ratio_estimation_node,
     query_refiner_node,
     benchmark_discovery_node,
+    benchmark_judgment_node,
     execute_ranking,
     synthesis_node,
 )
@@ -33,6 +34,9 @@ def _build_graph(settings: Settings):
     workflow.add_node(
         "benchmark_discovery",
         partial(benchmark_discovery_node, settings=settings),
+    )
+    workflow.add_node(
+        "benchmark_judgment_node", partial(benchmark_judgment_node, settings=settings)
     )
     workflow.add_node("ranking", execute_ranking)
     workflow.add_node("synthesis", partial(synthesis_node, settings=settings))
@@ -57,7 +61,8 @@ def _build_graph(settings: Settings):
 
     workflow.add_conditional_edges("validator", check_validity)
     workflow.add_edge(["token_ratio", "refiner"], "benchmark_discovery")
-    workflow.add_edge("benchmark_discovery", "ranking")
+    workflow.add_edge("benchmark_discovery", "benchmark_judgment_node")
+    workflow.add_edge("benchmark_judgment_node", "ranking")
     workflow.add_edge("ranking", "synthesis")
     workflow.add_edge("synthesis", END)
 
