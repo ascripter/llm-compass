@@ -82,16 +82,27 @@ def _run_stream_loop(event_stream, tracker_ph) -> tuple[dict | None, list[dict]]
                 traceability.render_live_tracker(steps, is_complete=False)
         elif etype == "complete":
             raw = event.get("data")
-            for step in steps:
-                if step["status"] not in ("done", "failed"):
-                    step["status"] = "done"
+            status = (raw or {}).get("status")
+            if status == "ok":
+                for step in steps:
+                    if step["status"] not in ("done", "failed"):
+                        step["status"] = "done"
+            else:
+                # Pipeline ended early — reset steps that never ran
+                for step in steps:
+                    if step["status"] == "running":
+                        step["status"] = "pending"
             with tracker_ph.container():
                 traceability.render_live_tracker(steps, is_complete=True)
         elif etype == "error":
+            first_running_found = False
             for step in steps:
                 if step["status"] == "running":
-                    step["status"] = "failed"
-                    break
+                    if not first_running_found:
+                        step["status"] = "failed"
+                        first_running_found = True
+                    else:
+                        step["status"] = "pending"
             with tracker_ph.container():
                 traceability.render_live_tracker(steps, is_complete=True)
             st.error(event.get("message", "Unknown error"))

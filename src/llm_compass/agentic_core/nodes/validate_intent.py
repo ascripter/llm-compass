@@ -177,7 +177,7 @@ def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, 
             "your request properly. Please start over and be as specific as possible:\n"
             f"{HINTS_MSG}"
         )
-        logs.append((f"Clarification limit exceeded (count={clarification_count})."))
+        logs.append(("Clarification limit exceeded"))
         state_update["clarification_limit_exceeded"] = True
         state_update["messages"] = [AIMessage(content=msg)]  # type: ignore
     elif not response.is_specific or first_ui_mismatch:
@@ -194,7 +194,7 @@ def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, 
                 msg += "Please clarify the following points:\n" + "\n".join(
                     f"- {q}" for q in response.clarification_needed
                 )
-            logs.append("Response not specific.")
+            logs.append("Response not specific")
             msg += "\n\n"
 
         if first_ui_mismatch:

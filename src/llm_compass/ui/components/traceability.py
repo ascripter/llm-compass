@@ -69,6 +69,8 @@ def _format_step_line(step: dict) -> str:
 def _step_lines(steps: list[dict]) -> None:
     """Write step lines into the current container."""
     for step in steps:
+        if step["status"] == "pending":
+            continue
         st.write(_format_step_line(step))
 
 
@@ -95,7 +97,7 @@ def render_live_tracker(steps: list[dict], is_complete: bool) -> None:
 
     st.markdown(f"`{_dot_row(steps)}`  {label}")
 
-    with st.expander("Execution trace", expanded=not is_complete):
+    with st.expander("Execution trace", expanded=True):
         rendered_groups: set[frozenset[int]] = set()
         for i, step in enumerate(steps):
             if step["status"] == "pending":
