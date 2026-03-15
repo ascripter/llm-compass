@@ -366,10 +366,12 @@ async def _stream_graph(session_id: str, initial_state: dict, config: dict) -> A
                     else:
                         accumulated[key] = value
 
+                node_logs = update.get("logs") or None
                 event = StreamEvent(
                     event="node_complete",
                     node=node_name,
                     message=_NODE_LABELS.get(node_name, node_name),
+                    logs=node_logs,
                 )
                 yield json.dumps(event.model_dump()) + "\n"
     except Exception as exc:

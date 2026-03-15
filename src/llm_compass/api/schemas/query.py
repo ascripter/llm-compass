@@ -41,6 +41,7 @@ class StreamEvent(BaseModel):
     node: Optional[str] = None
     message: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
+    logs: Optional[List[str]] = None
 
 
 class QueryResponse(BaseModel):

@@ -48,16 +48,36 @@ def _run_stream_loop(event_stream, tracker_ph) -> tuple[dict | None, list[dict]]
         etype = event.get("event")
         if etype == "node_complete":
             msg = event.get("message", "")
+            node_logs = event.get("logs") or []
             matched = False
+
+            # Match by name so parallel nodes get the right logs
             for i, step in enumerate(steps):
-                if step["status"] == "running" or step["name"] == msg:
+                if step["name"] == msg:
                     step["status"] = "done"
-                    if i + 1 < len(steps):
-                        steps[i + 1]["status"] = "running"
+                    step["logs"] = node_logs
                     matched = True
+
+                    group = traceability.parallel_group_for(i)
+                    if group is not None:
+                        # Parallel step: advance only when ALL group members done
+                        if all(steps[j]["status"] == "done" for j in group):
+                            next_idx = max(group) + 1
+                            if next_idx < len(steps):
+                                steps[next_idx]["status"] = "running"
+                    else:
+                        # Sequential step: start next (or whole parallel group)
+                        if i + 1 < len(steps):
+                            next_group = traceability.parallel_group_for(i + 1)
+                            if next_group is not None:
+                                for j in next_group:
+                                    steps[j]["status"] = "running"
+                            else:
+                                steps[i + 1]["status"] = "running"
                     break
+
             if not matched:
-                steps.append({"name": msg, "status": "done"})
+                steps.append({"name": msg, "status": "done", "logs": node_logs})
             with tracker_ph.container():
                 traceability.render_live_tracker(steps, is_complete=False)
         elif etype == "complete":
