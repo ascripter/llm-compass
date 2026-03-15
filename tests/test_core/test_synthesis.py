@@ -143,7 +143,7 @@ def _make_state(**kwargs) -> dict:
         "user_query": "Which model is best for RAG on legal docs?",
         "messages": [],
         "ranked_results": None,
-        "average_benchmark_similarity": 0.8,
+        "best_benchmark_weight": 0.8,
         "intent_extraction": {},  # "reasoning": "User wants a model for legal RAG."},
     }
     defaults.update(kwargs)
@@ -308,18 +308,18 @@ class TestGenerateWarnings:
             balanced=[model, _make_ranked_model(model_id=2), _make_ranked_model(model_id=3)],
             budget=[model, _make_ranked_model(model_id=2), _make_ranked_model(model_id=3)],
         )
-        state = _make_state(average_benchmark_similarity=0.9)
+        state = _make_state(best_benchmark_weight=0.9)
         warnings = _generate_warnings(state, ranked)
         assert warnings == []
 
     def test_low_relevance_warning_when_avg_sim_below_threshold(self):
-        state = _make_state(average_benchmark_similarity=0.4)
+        state = _make_state(best_benchmark_weight=0.4)
         warnings = _generate_warnings(state, _make_ranked_lists())
         codes = [w.code for w in warnings]
         assert "LOW_RELEVANCE" in codes
 
     def test_no_low_relevance_warning_at_boundary(self):
-        state = _make_state(average_benchmark_similarity=0.6)
+        state = _make_state(best_benchmark_weight=0.6)
         warnings = _generate_warnings(state, _make_ranked_lists())
         codes = [w.code for w in warnings]
         assert "LOW_RELEVANCE" not in codes
@@ -699,7 +699,7 @@ class TestSynthesisNode:
 
     def test_warnings_populated_for_low_similarity(self):
         ranked = self._ranked_with_two_models()
-        state = _make_state(ranked_results=ranked, average_benchmark_similarity=0.3)
+        state = _make_state(ranked_results=ranked, best_benchmark_weight=0.3)
         result = synthesis_node(state, settings=_make_settings(_default_llm_output()))
         codes = [w.code for w in result["final_response"].warnings]
         assert "LOW_RELEVANCE" in codes

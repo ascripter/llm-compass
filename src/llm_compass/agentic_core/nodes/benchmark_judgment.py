@@ -57,7 +57,10 @@ def benchmark_judgment_node(state: AgentState, *, settings: Settings) -> dict:
     weighted_benchmarks = state.get("weighted_benchmarks", [])
     if not weighted_benchmarks:
         logger.warning("No weighted_benchmarks found in state — skipping judgment")
-        return {"benchmark_judgements": BenchmarkJudgments(judgments=[])}
+        return {
+            "benchmark_judgements": BenchmarkJudgments(judgments=[]),
+            "best_benchmark_weight": 0.0,
+        }
 
     user_query = state.get("user_query", "")
 
@@ -110,13 +113,20 @@ def benchmark_judgment_node(state: AgentState, *, settings: Settings) -> dict:
     )
 
     n_relevant = sum(1 for j in judgments.judgments if j.relevance_weight > 0.0)
+    best_weight = (
+        max(j.relevance_weight for j in judgments.judgments)
+        if judgments.judgments
+        else 0.0
+    )
     logger.info(
-        "benchmark_judgment_node EXIT | judged=%d | relevant=%d",
+        "benchmark_judgment_node EXIT | judged=%d | relevant=%d | best_weight=%.2f",
         len(judgments.judgments),
         n_relevant,
+        best_weight,
     )
 
     return {
         "benchmark_judgements": judgments,
+        "best_benchmark_weight": best_weight,
         "logs": [f"{n_relevant} are relevant"],
     }

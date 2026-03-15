@@ -125,12 +125,12 @@ def _generate_warnings(state: dict[str, Any], ranked: RankedLists) -> list[Warni
     """Produce data-quality warnings based on pipeline state and ranked results."""
     warnings: list[Warning] = []
 
-    avg_sim = state.get("average_benchmark_similarity", 0.0)
-    if isinstance(avg_sim, (int, float)) and avg_sim < 0.6:
+    best_weight = state.get("best_benchmark_weight", 0.0)
+    if isinstance(best_weight, (int, float)) and best_weight < 0.6:
         warnings.append(
             Warning(
                 code="LOW_RELEVANCE",
-                message=f"Average benchmark relevance is low ({avg_sim:.2f}). "
+                message=f"Best benchmark relevance is low ({best_weight:.2f}). "
                 "Results may not closely match the intended use case.",
             )
         )
@@ -382,8 +382,11 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
                 " | reasons_keys=%s | calibration_note=%s",
                 len(llm_output.task_summary),
                 len(llm_output.executive_summary),
-                [k for k in ("top_performance", "balanced", "budget")
-                 if getattr(llm_output.recommendation_reasons, k, None)],
+                [
+                    k
+                    for k in ("top_performance", "balanced", "budget")
+                    if getattr(llm_output.recommendation_reasons, k, None)
+                ],
                 llm_output.offset_calibration_note is not None,
             )
             logs.append("Synthesis: LLM generated summary.")
@@ -463,9 +466,7 @@ def _invoke_synthesis_llm(
             "models/benchmarks were estimated."
         )
     else:
-        user_msg_parts.append(
-            "\nNo estimated scores. Set offset_calibration_note to null."
-        )
+        user_msg_parts.append("\nNo estimated scores. Set offset_calibration_note to null.")
 
     messages = [
         SystemMessage(content=SYNTHESIS_SYSTEM_PROMPT),

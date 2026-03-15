@@ -324,3 +324,59 @@ class TestHumanMessageContent:
         # No raw newlines within a single description field
         assert "Line one.\nLine two." not in content
         assert "Line one. Line two. Line three." in content
+
+
+# ---------------------------------------------------------------------------
+# best_benchmark_weight computation
+# ---------------------------------------------------------------------------
+
+
+class TestBestBenchmarkWeight:
+    def test_best_weight_is_max_of_judgments(self):
+        response = BenchmarkJudgments(
+            judgments=[
+                _make_judgment(1, "perfect_match"),
+                _make_judgment(2, "partial_match"),
+                _make_judgment(3, "no_match"),
+            ]
+        )
+        benchmarks = [_make_bm(id=1), _make_bm(id=2), _make_bm(id=3)]
+        result = benchmark_judgment_node(
+            _make_state(weighted_benchmarks=benchmarks),
+            settings=_make_settings(response),
+        )
+
+        assert result["best_benchmark_weight"] == pytest.approx(1.0)
+
+    def test_best_weight_zero_when_all_no_match(self):
+        response = BenchmarkJudgments(
+            judgments=[
+                _make_judgment(1, "no_match"),
+                _make_judgment(2, "no_match"),
+            ]
+        )
+        benchmarks = [_make_bm(id=1), _make_bm(id=2)]
+        result = benchmark_judgment_node(
+            _make_state(weighted_benchmarks=benchmarks),
+            settings=_make_settings(response),
+        )
+
+        assert result["best_benchmark_weight"] == pytest.approx(0.0)
+
+    def test_best_weight_zero_when_no_benchmarks(self):
+        settings = MagicMock(spec=Settings)
+        result = benchmark_judgment_node(
+            _make_state(weighted_benchmarks=[]), settings=settings
+        )
+
+        assert result["best_benchmark_weight"] == pytest.approx(0.0)
+
+    def test_best_weight_with_single_weak_match(self):
+        response = BenchmarkJudgments(
+            judgments=[_make_judgment(1, "weak_match")]
+        )
+        result = benchmark_judgment_node(
+            _make_state(), settings=_make_settings(response)
+        )
+
+        assert result["best_benchmark_weight"] == pytest.approx(0.25)
