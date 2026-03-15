@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_relevant_benchmarks(
-    queries: List[str], settings: Settings, session: Session, cutoff_score: float = 0.0
+    queries: List[str], settings: Settings, session: Session, cutoff_score: float = 0.4
 ) -> List[Dict[str, Any]]:
     """
     Perform vector search against the Benchmark Dictionary for each query.
@@ -33,7 +33,7 @@ def find_relevant_benchmarks(
         cutoff_score: Minimum relevance score to include
 
     Returns:
-        List of dicts: [{"id": "mmlu", "name": "MMLU", "relevance_weight": 0.9}, ...]
+        List of dicts: [{"score": 0.9, <BenchmarkDictionary keys/values>}, ...]
     """
     embedding = get_embedding(settings)
 
@@ -69,17 +69,17 @@ def find_relevant_benchmarks(
             benchmark_scores[bench_id] = {
                 c.name: getattr(item, c.name) for c in item.__table__.columns
             }
-            benchmark_scores[bench_id]["weight"] = 0.0
-        benchmark_scores[bench_id]["weight"] = max(
-            round(score, 4), benchmark_scores[bench_id]["weight"]
+            benchmark_scores[bench_id]["score"] = 0.0
+        benchmark_scores[bench_id]["score"] = max(
+            round(score, 4), benchmark_scores[bench_id]["score"]
         )
 
-    results = [v for v in benchmark_scores.values() if v["weight"] > cutoff_score]
-    results.sort(key=lambda v: -v["weight"])
+    results = [v for v in benchmark_scores.values() if v["score"] > cutoff_score]
+    results.sort(key=lambda v: -v["score"])
     logger.debug(
         "Benchmarks found: "
         + " | ".join(
-            [f"weight={_['weight']}: {_['name_normalized']} ({_['variant']})" for _ in results]
+            [f"score={_['score']}: {_['name_normalized']} ({_['variant']})" for _ in results]
         )
     )
     logger.info(f"Found {len(results)} relevant benchmarks from {len(queries)} queries")
@@ -104,7 +104,7 @@ def benchmark_discovery_node(
         logger.info(f"Set weighted_benchmarks: {len(results)} items")
         return {
             "weighted_benchmarks": results,
-            "average_benchmark_similarity": sum(_["weight"] for _ in results) / len(results),
+            "average_benchmark_similarity": sum(_["score"] for _ in results) / len(results),
         }
     except Exception as e:
         logger.error(f"Error in benchmark discovery: {e}")
