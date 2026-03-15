@@ -41,8 +41,9 @@ def response_to_display(api_response: dict[str, Any]) -> dict[str, Any]:
         "trace_messages": [e.get("message", "") for e in events if isinstance(e, dict)],
         "debug_summary": api_response.get("debug_summary"),
         "summary_markdown": ui.get("summary_markdown"),
-        "comparison_table": ui.get("comparison_table"),
+        "tier_tables": ui.get("tier_tables", []),
         "recommendation_cards": ui.get("recommendation_cards", []),
+        "benchmarks_used": ui.get("benchmarks_used", []),
         "warnings": ui.get("warnings", []),
         "errors": api_response.get("errors", []),
     }

@@ -1,25 +1,29 @@
 """Node 5: Synthesis (LLM + Deterministic).
 
 Builds the final ``SynthesisOutput`` from ranked results and pipeline state.
-The LLM generates natural-language parts (task summary, executive summary,
-recommendation reasons, offset calibration note); deterministic helpers build
-the comparison table, recommendation cards, citations, and warnings.
+The LLM generates natural-language parts (task summary, recommendation reasons,
+offset calibration note); deterministic helpers build the tier tables,
+recommendation cards, benchmarks used, citations, and warnings.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from llm_compass.config import Settings
+from ..schemas.benchmark_judgment import BenchmarkJudgments
 from ..schemas.ranking import RankedLists, RankedModel
 from ..schemas.synthesis import (
+    BenchmarkUsed,
     Citation,
-    ComparisonTable,
     RecommendationCard,
     RecommendationReasons,
     SynthesisLLMOutput,
     SynthesisOutput,
+    TierBenchmarkScore,
+    TierTable,
+    TierTableRow,
     Warning,
 )
 from ..state import AgentState
@@ -32,67 +36,182 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _build_comparison_table(ranked: RankedLists) -> ComparisonTable:
-    """Fixed base columns + top-N benchmark names by weight as extra columns.
+def _select_benchmark_columns(
+    benchmark_judgments: BenchmarkJudgments | None,
+    weighted_benchmarks: list[dict],
+) -> list[dict]:
+    """Select which benchmarks become table columns based on judgment weights.
 
-    Deduplicates models across all three ranking lists; sorts by blended_score desc.
+    Returns list of dicts: ``{benchmark_id, display_name, weight}``.
+    Logic: pick ALL benchmarks in the highest relevance tier that has entries.
+    If only 1 benchmark is in that tier, also add ALL from the next lower tier.
     """
-    # Collect unique models (deduplicate by model_id)
-    seen: set[int] = set()
-    all_models: list[RankedModel] = []
-    for model_list in [ranked.top_performance, ranked.balanced, ranked.budget]:
-        for m in model_list:
-            if m.model_id not in seen:
-                seen.add(m.model_id)
-                all_models.append(m)
+    # Build id -> display info lookup
+    bm_lookup: Dict[int, dict] = {}
+    for b in weighted_benchmarks:
+        bid = b.get("id")
+        if bid is None:
+            continue
+        name = b.get("name_normalized") or str(bid)
+        variant = b.get("variant")
+        display = f"{name} ({variant})" if variant else name
+        bm_lookup[int(bid)] = {"display_name": display, "name": name, "variant": variant}
 
-    all_models.sort(key=lambda m: m.rank_metrics.blended_score, reverse=True)
+    if benchmark_judgments is None or not benchmark_judgments.judgments:
+        # Fallback: top-6 from weighted_benchmarks by discovery weight
+        selected = []
+        for b in weighted_benchmarks[:6]:
+            bid = b.get("id")
+            if bid is None:
+                continue
+            info = bm_lookup.get(int(bid), {})
+            selected.append({
+                "benchmark_id": int(bid),
+                "display_name": info.get("display_name", str(bid)),
+                "weight": b.get("weight", 0.0),
+            })
+        return selected
 
-    # Determine top-N benchmark columns by weight across all models
-    bench_weight: Dict[str, float] = {}
-    for m in all_models:
-        for br in m.benchmark_results:
-            key = br.benchmark_name
-            if br.benchmark_variant:
-                key = f"{key} ({br.benchmark_variant})"
-            if key not in bench_weight or br.weight_used > bench_weight[key]:
-                bench_weight[key] = br.weight_used
+    # Group judgments by weight tier (descending)
+    weight_tiers: Dict[float, list[dict]] = {}
+    for j in benchmark_judgments.judgments:
+        w = j.relevance_weight
+        if w <= 0.0:
+            continue
+        info = bm_lookup.get(j.benchmark_id, {})
+        entry = {
+            "benchmark_id": j.benchmark_id,
+            "display_name": info.get("display_name", str(j.benchmark_id)),
+            "weight": w,
+        }
+        weight_tiers.setdefault(w, []).append(entry)
 
-    top_benchmarks = sorted(bench_weight, key=bench_weight.get, reverse=True)[:6]  # type: ignore[arg-type]
+    if not weight_tiers:
+        return []
 
-    columns = ["Model", "Provider", "Blended Score", "Cost Index", "Speed (tps)", "Est?"]
-    columns.extend(top_benchmarks)
+    # Sort tiers descending by weight
+    sorted_weights = sorted(weight_tiers.keys(), reverse=True)
+    selected = list(weight_tiers[sorted_weights[0]])
 
-    rows: List[List[Any]] = []
-    for m in all_models:
-        has_estimated = any(br.is_estimated for br in m.benchmark_results)
-        row: List[Any] = [
-            m.name_normalized,
-            m.provider,
-            round(m.rank_metrics.blended_score, 3),
-            round(m.rank_metrics.blended_cost_index, 3),
-            m.speed_tps,
-            "Yes" if has_estimated else "No",
-        ]
-        # Add benchmark score columns
-        bench_scores: Dict[str, float] = {}
-        for br in m.benchmark_results:
-            key = br.benchmark_name
-            if br.benchmark_variant:
-                key = f"{key} ({br.benchmark_variant})"
-            bench_scores[key] = br.score
+    # If only 1 benchmark in the top tier, add all from the next tier
+    if len(selected) == 1 and len(sorted_weights) > 1:
+        selected.extend(weight_tiers[sorted_weights[1]])
 
-        for bname in top_benchmarks:
-            score = bench_scores.get(bname)
-            row.append(round(score, 2) if score is not None else None)
+    return selected
 
-        rows.append(row)
 
-    return ComparisonTable(
-        title="Model Comparison",
-        columns=columns,
-        rows=rows,
-    )
+def _format_speed(model: RankedModel) -> str:
+    """Format speed_class with optional tps in brackets."""
+    sc = model.speed_class or "unknown"
+    if model.speed_tps is not None:
+        return f"{sc} ({model.speed_tps})"
+    return sc
+
+
+def _find_estimation_source(model: RankedModel, target_name: str, target_variant: str | None) -> str | None:
+    """Find the source benchmark variant that an estimated score was derived from."""
+    for br in model.benchmark_results:
+        if br.benchmark_name == target_name and not br.is_estimated:
+            # This is a non-estimated result for the same benchmark name but different variant
+            if br.benchmark_variant != target_variant:
+                if br.benchmark_variant:
+                    return f"{br.benchmark_name} ({br.benchmark_variant})"
+                return br.benchmark_name
+    return None
+
+
+def _build_tier_tables(
+    ranked: RankedLists,
+    selected_columns: list[dict],
+) -> list[TierTable]:
+    """Build 3 TierTable objects (Top Performance, Balanced, Budget Picks)."""
+    column_ids = [c["benchmark_id"] for c in selected_columns]
+    column_names = [c["display_name"] for c in selected_columns]
+
+    tables: list[TierTable] = []
+    for tier_key, tier_name, model_list in [
+        ("top_performance", "Top Performance", ranked.top_performance),
+        ("balanced", "Balanced", ranked.balanced),
+        ("budget", "Budget Picks", ranked.budget),
+    ]:
+        top5 = sorted(model_list[:5], key=lambda m: m.rank_metrics.blended_score, reverse=True)
+
+        rows: list[TierTableRow] = []
+        for m in top5:
+            # Build benchmark score lookup: benchmark_id -> BenchmarkResult
+            br_by_id: Dict[int, Any] = {}
+            for br in m.benchmark_results:
+                br_by_id[br.benchmark_id] = br
+
+            bench_scores: list[TierBenchmarkScore] = []
+            for bid in column_ids:
+                br = br_by_id.get(bid)
+                if br is None:
+                    bench_scores.append(TierBenchmarkScore(value=None))
+                else:
+                    est_source = None
+                    if br.is_estimated:
+                        est_source = _find_estimation_source(m, br.benchmark_name, br.benchmark_variant)
+                    bench_scores.append(TierBenchmarkScore(
+                        value=round(br.score, 2),
+                        is_estimated=br.is_estimated,
+                        estimation_source=est_source,
+                    ))
+
+            rows.append(TierTableRow(
+                model_name=m.name_normalized,
+                provider=m.provider,
+                speed=_format_speed(m),
+                score=round(m.rank_metrics.blended_score, 3),
+                benchmark_scores=bench_scores,
+            ))
+
+        tables.append(TierTable(
+            tier_name=tier_name,
+            columns=column_names,
+            rows=rows,
+        ))
+
+    return tables
+
+
+def _build_benchmarks_used(
+    benchmark_judgments: BenchmarkJudgments | None,
+    weighted_benchmarks: list[dict],
+) -> list[BenchmarkUsed]:
+    """Build 'Benchmarks Used' reference table from judgment + discovery data."""
+    if benchmark_judgments is None or not benchmark_judgments.judgments:
+        return []
+
+    # Build id -> info lookup from weighted_benchmarks
+    bm_lookup: Dict[int, dict] = {}
+    for b in weighted_benchmarks:
+        bid = b.get("id")
+        if bid is None:
+            continue
+        bm_lookup[int(bid)] = {
+            "name_normalized": b.get("name_normalized", ""),
+            "variant": b.get("variant"),
+            "description": b.get("description", ""),
+        }
+
+    entries: list[BenchmarkUsed] = []
+    for j in benchmark_judgments.judgments:
+        if j.relevance_weight <= 0.0:
+            continue
+        info = bm_lookup.get(j.benchmark_id, {})
+        name = info.get("name_normalized", str(j.benchmark_id))
+        variant = info.get("variant")
+        display_name = f"{name} ({variant})" if variant else name
+
+        entries.append(BenchmarkUsed(
+            benchmark_name=display_name,
+            weight=j.relevance_weight,
+            description=info.get("description", ""),
+        ))
+
+    entries.sort(key=lambda e: e.weight, reverse=True)
+    return entries
 
 
 def _extract_citations(ranked: RankedLists) -> list[Citation]:
@@ -208,7 +327,7 @@ def _pick_recommendation_cards(
     return cards
 
 
-def _build_fallback_summary(state: dict[str, Any], ranked: RankedLists) -> str:
+def _build_fallback_summary(state: dict[str, Any]) -> str:
     """Build a markdown summary from pipeline results (no LLM call)."""
     parts: list[str] = []
 
@@ -222,30 +341,6 @@ def _build_fallback_summary(state: dict[str, Any], ranked: RankedLists) -> str:
         if reasoning:
             parts.append(f"## Your Task\n\n{reasoning}")
 
-    # Recommendations per category
-    categories = [
-        ("top_performance", "Top Performance"),
-        ("balanced", "Balanced"),
-        ("budget", "Budget"),
-    ]
-    ranking_parts: list[str] = []
-    for key, label in categories:
-        models = getattr(ranked, key, [])
-        if not models:
-            continue
-        ranking_parts.append(f"**{label}**")
-        for i, m in enumerate(models[:3], 1):
-            blended = m.rank_metrics.blended_score
-            provider_str = f" ({m.provider})" if m.provider else ""
-            ranking_parts.append(
-                f"{i}. **{m.name_normalized}**{provider_str} — blended score: {blended:.3f}"
-            )
-            if m.reason_for_ranking:
-                ranking_parts.append(f"   _{m.reason_for_ranking}_")
-
-    if ranking_parts:
-        parts.append("## Recommendations\n\n" + "\n".join(ranking_parts))
-
     if not parts:
         parts.append("Analysis complete. Ranking and recommendations are not yet available.")
 
@@ -256,7 +351,6 @@ def _assemble_summary_markdown(llm_out: SynthesisLLMOutput) -> str:
     """Assemble ``summary_markdown`` from LLM output per PRD Node 5 spec."""
     parts = [
         f"## Your Task\n\n{llm_out.task_summary}",
-        f"## Recommendations\n\n{llm_out.executive_summary}",
     ]
     if llm_out.offset_calibration_note:
         parts.append(f"> **Note:** {llm_out.offset_calibration_note}")
@@ -302,6 +396,22 @@ def _build_ranking_context(ranked: RankedLists) -> str:
                     f": {br.score:.2f} {br.metric_unit} (weight={br.weight_used:.2f}){est_tag}"
                 )
     return "\n".join(lines)
+
+
+def _parse_benchmark_judgments(state: dict[str, Any]) -> BenchmarkJudgments | None:
+    """Parse benchmark_judgements from state (may be dict or object)."""
+    raw = state.get("benchmark_judgements")
+    if raw is None:
+        return None
+    if isinstance(raw, BenchmarkJudgments):
+        return raw
+    if isinstance(raw, dict):
+        try:
+            return BenchmarkJudgments.model_validate(raw)
+        except Exception:
+            logger.warning("Could not parse benchmark_judgements", exc_info=True)
+            return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -356,14 +466,23 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
         has_estimated,
     )
 
+    # --- Parse benchmark judgment data from state ---
+    benchmark_judgments = _parse_benchmark_judgments(state)
+    weighted_benchmarks = state.get("weighted_benchmarks", [])
+
     # --- Deterministic components (always built) ---
-    comparison_table = _build_comparison_table(ranked)
+    selected_columns = _select_benchmark_columns(benchmark_judgments, weighted_benchmarks)
+    tier_tables = _build_tier_tables(ranked, selected_columns)
+    benchmarks_used = _build_benchmarks_used(benchmark_judgments, weighted_benchmarks)
     citations = _extract_citations(ranked)
     warnings = _generate_warnings(state, ranked)
 
+    total_rows = sum(len(t.rows) for t in tier_tables)
     logger.debug(
-        "synthesis_node deterministic | table_rows=%d | citations=%d | warnings=%d",
-        len(comparison_table.rows),
+        "synthesis_node deterministic | tier_table_rows=%d | benchmarks_used=%d"
+        " | citations=%d | warnings=%d",
+        total_rows,
+        len(benchmarks_used),
         len(citations),
         len(warnings),
     )
@@ -378,10 +497,9 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
         try:
             llm_output = _invoke_synthesis_llm(state, ranked, settings)
             logger.debug(
-                "synthesis_node LLM | task_summary_len=%d | exec_summary_len=%d"
+                "synthesis_node LLM | task_summary_len=%d"
                 " | reasons_keys=%s | calibration_note=%s",
                 len(llm_output.task_summary),
-                len(llm_output.executive_summary),
                 [
                     k
                     for k in ("top_performance", "balanced", "budget")
@@ -406,13 +524,14 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
     if llm_output is not None:
         summary = _assemble_summary_markdown(llm_output)
     else:
-        summary = _build_fallback_summary(state, ranked)
+        summary = _build_fallback_summary(state)
 
     output = SynthesisOutput(
         llm_output=llm_output,
         summary_markdown=summary,
-        comparison_table=comparison_table,
+        tier_tables=tier_tables,
         recommendation_cards=recommendation_cards,
+        benchmarks_used=benchmarks_used,
         citations=citations,
         warnings=warnings,
     )

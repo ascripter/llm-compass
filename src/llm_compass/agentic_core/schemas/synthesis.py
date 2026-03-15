@@ -9,12 +9,6 @@ from pydantic import BaseModel, Field
 # Reusable UI building-blocks (moved from api/schemas/query.py)
 # ---------------------------------------------------------------------------
 
-class ComparisonTable(BaseModel):
-    title: str
-    columns: List[str]
-    rows: List[List[Any]]
-
-
 class RecommendationCard(BaseModel):
     category: str
     model_name: str
@@ -30,6 +24,38 @@ class Citation(BaseModel):
 class Warning(BaseModel):
     code: str
     message: str
+
+
+# ---------------------------------------------------------------------------
+# Tier table building-blocks (3 tier tables replace single ComparisonTable)
+# ---------------------------------------------------------------------------
+
+class TierBenchmarkScore(BaseModel):
+    """A single benchmark score cell in a tier table."""
+    value: Optional[float] = None
+    is_estimated: bool = False
+    estimation_source: Optional[str] = None  # e.g. "MMLU (5-shot)"
+
+
+class TierTableRow(BaseModel):
+    model_name: str
+    provider: str
+    speed: str          # e.g. "fast (142)" or "medium"
+    score: float        # tier-specific blended_score (0-1)
+    benchmark_scores: List[TierBenchmarkScore] = []
+
+
+class TierTable(BaseModel):
+    tier_name: str      # "Top Performance", "Balanced", "Budget Picks"
+    columns: List[str]  # benchmark column display names
+    rows: List[TierTableRow] = []
+
+
+class BenchmarkUsed(BaseModel):
+    """Entry in the 'Benchmarks Used' reference table."""
+    benchmark_name: str  # name_normalized (variant) if variant exists
+    weight: float        # relevance_weight from judgment
+    description: str
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +89,6 @@ class SynthesisLLMOutput(BaseModel):
     task_summary: str = Field(
         description="1-2 sentence rephrasing of the user's intended task."
     )
-    executive_summary: str = Field(
-        description=(
-            "3-5 sentence markdown highlighting top performance winner, budget winner, "
-            "key trade-offs, and most relevant benchmarks."
-        )
-    )
     recommendation_reasons: RecommendationReasons = Field(
         description=(
             "One reason per category explaining why the model wins, referencing benchmarks. "
@@ -93,7 +113,8 @@ class SynthesisOutput(BaseModel):
 
     llm_output: Optional[SynthesisLLMOutput] = None
     summary_markdown: str
-    comparison_table: Optional[ComparisonTable] = None
+    tier_tables: List[TierTable] = []
     recommendation_cards: List[RecommendationCard] = []
+    benchmarks_used: List[BenchmarkUsed] = []
     citations: List[Citation] = []
     warnings: List[Warning] = []

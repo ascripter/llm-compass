@@ -6,14 +6,20 @@ import pytest
 
 from llm_compass.agentic_core.nodes.synthesis import (
     _assemble_summary_markdown,
-    _build_comparison_table,
+    _build_benchmarks_used,
     _build_fallback_summary,
     _build_ranking_context,
+    _build_tier_tables,
     _extract_citations,
     _generate_warnings,
     _has_estimated_scores,
     _pick_recommendation_cards,
+    _select_benchmark_columns,
     synthesis_node,
+)
+from llm_compass.agentic_core.schemas.benchmark_judgment import (
+    BenchmarkJudgment,
+    BenchmarkJudgments,
 )
 from llm_compass.agentic_core.schemas.ranking import (
     BenchmarkResult,
@@ -126,7 +132,6 @@ def _make_failing_settings() -> MagicMock:
 def _default_llm_output(**kwargs) -> SynthesisLLMOutput:
     defaults = dict(
         task_summary="Summarise legal documents using an LLM.",
-        executive_summary="**Model-A** leads on HumanEval. **Model-B** is the budget pick.",
         recommendation_reasons={
             "top_performance": "Best HumanEval score.",
             "balanced": "Good balance of cost and quality.",
@@ -144,92 +149,170 @@ def _make_state(**kwargs) -> dict:
         "messages": [],
         "ranked_results": None,
         "best_benchmark_weight": 0.8,
-        "intent_extraction": {},  # "reasoning": "User wants a model for legal RAG."},
+        "intent_extraction": {},
+        "benchmark_judgements": None,
+        "weighted_benchmarks": [],
     }
     defaults.update(kwargs)
     return defaults
 
 
 # ---------------------------------------------------------------------------
-# TestBuildComparisonTable
+# TestSelectBenchmarkColumns
 # ---------------------------------------------------------------------------
 
 
-class TestBuildComparisonTable:
-    def test_empty_ranked_lists_gives_empty_rows(self):
-        table = _build_comparison_table(_make_ranked_lists())
-        assert table.rows == []
-        assert "Model" in table.columns
+class TestSelectBenchmarkColumns:
+    def test_no_judgments_falls_back_to_weighted_benchmarks(self):
+        wb = [{"id": 1, "name_normalized": "MMLU", "variant": "5-shot", "weight": 0.9}]
+        cols = _select_benchmark_columns(None, wb)
+        assert len(cols) == 1
+        assert cols[0]["display_name"] == "MMLU (5-shot)"
 
-    def test_single_model_produces_one_row(self):
-        model = _make_ranked_model(model_id=1, name="alpha")
-        table = _build_comparison_table(_make_ranked_lists(top_performance=[model]))
-        assert len(table.rows) == 1
-        assert table.rows[0][0] == "alpha"
+    def test_selects_highest_weight_tier(self):
+        # 2 perfect_match benchmarks → only those selected (no next-tier expansion)
+        judgments = BenchmarkJudgments(judgments=[
+            BenchmarkJudgment(benchmark_id=1, relevance_class="perfect_match", short_rationale="direct"),
+            BenchmarkJudgment(benchmark_id=2, relevance_class="perfect_match", short_rationale="also direct"),
+            BenchmarkJudgment(benchmark_id=3, relevance_class="strong_match", short_rationale="related"),
+        ])
+        wb = [
+            {"id": 1, "name_normalized": "A", "variant": None},
+            {"id": 2, "name_normalized": "B", "variant": None},
+            {"id": 3, "name_normalized": "C", "variant": None},
+        ]
+        cols = _select_benchmark_columns(judgments, wb)
+        assert len(cols) == 2
+        ids = {c["benchmark_id"] for c in cols}
+        assert ids == {1, 2}
 
-    def test_deduplicates_models_across_lists(self):
-        m = _make_ranked_model(model_id=1, name="shared")
-        ranked = _make_ranked_lists(
-            top_performance=[m],
-            balanced=[m],
-            budget=[m],
-        )
-        table = _build_comparison_table(ranked)
-        assert len(table.rows) == 1
+    def test_single_top_tier_adds_next_tier(self):
+        judgments = BenchmarkJudgments(judgments=[
+            BenchmarkJudgment(benchmark_id=1, relevance_class="perfect_match", short_rationale="direct"),
+            BenchmarkJudgment(benchmark_id=2, relevance_class="strong_match", short_rationale="a"),
+            BenchmarkJudgment(benchmark_id=3, relevance_class="strong_match", short_rationale="b"),
+        ])
+        wb = [
+            {"id": 1, "name_normalized": "A", "variant": None},
+            {"id": 2, "name_normalized": "B", "variant": None},
+            {"id": 3, "name_normalized": "C", "variant": None},
+        ]
+        cols = _select_benchmark_columns(judgments, wb)
+        ids = {c["benchmark_id"] for c in cols}
+        assert ids == {1, 2, 3}
 
-    def test_rows_sorted_by_blended_score_desc(self):
+    def test_no_match_excluded(self):
+        judgments = BenchmarkJudgments(judgments=[
+            BenchmarkJudgment(benchmark_id=1, relevance_class="no_match", short_rationale="not relevant"),
+        ])
+        wb = [{"id": 1, "name_normalized": "A", "variant": None}]
+        cols = _select_benchmark_columns(judgments, wb)
+        assert cols == []
+
+
+# ---------------------------------------------------------------------------
+# TestBuildTierTables
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTierTables:
+    def test_three_tables_created(self):
+        m = _make_ranked_model()
+        ranked = _make_ranked_lists(top_performance=[m], balanced=[m], budget=[m])
+        tables = _build_tier_tables(ranked, [])
+        assert len(tables) == 3
+        names = [t.tier_name for t in tables]
+        assert names == ["Top Performance", "Balanced", "Budget Picks"]
+
+    def test_top5_limit(self):
+        models = [_make_ranked_model(model_id=i, name=f"m{i}") for i in range(8)]
+        ranked = _make_ranked_lists(top_performance=models)
+        tables = _build_tier_tables(ranked, [])
+        assert len(tables[0].rows) == 5
+
+    def test_rows_sorted_by_score_desc(self):
         low = _make_ranked_model(model_id=1, name="low", blended_score=0.3)
         high = _make_ranked_model(model_id=2, name="high", blended_score=0.9)
-        table = _build_comparison_table(_make_ranked_lists(top_performance=[low, high]))
-        assert table.rows[0][0] == "high"
-        assert table.rows[1][0] == "low"
+        ranked = _make_ranked_lists(top_performance=[low, high])
+        tables = _build_tier_tables(ranked, [])
+        assert tables[0].rows[0].model_name == "high"
 
-    def test_base_columns_present(self):
-        table = _build_comparison_table(_make_ranked_lists())
-        for col in ["Model", "Provider", "Blended Score", "Cost Index", "Speed (tps)", "Est?"]:
-            assert col in table.columns
+    def test_speed_format_with_tps(self):
+        m = _make_ranked_model(speed_tps=150)
+        ranked = _make_ranked_lists(top_performance=[m])
+        tables = _build_tier_tables(ranked, [])
+        assert tables[0].rows[0].speed == "fast (150)"
 
-    def test_benchmark_columns_added_up_to_6(self):
-        benchmarks = [
-            _make_benchmark_result(
-                benchmark_id=i, benchmark_name=f"Bench{i}", weight_used=float(i)
-            )
-            for i in range(1, 8)
+    def test_speed_format_without_tps(self):
+        m = _make_ranked_model(speed_tps=None)
+        ranked = _make_ranked_lists(top_performance=[m])
+        tables = _build_tier_tables(ranked, [])
+        assert tables[0].rows[0].speed == "fast"
+
+    def test_benchmark_score_populated(self):
+        br = _make_benchmark_result(benchmark_id=1, score=85.5)
+        m = _make_ranked_model(benchmark_results=[br])
+        ranked = _make_ranked_lists(top_performance=[m])
+        cols = [{"benchmark_id": 1, "display_name": "HumanEval", "weight": 1.0}]
+        tables = _build_tier_tables(ranked, cols)
+        assert tables[0].rows[0].benchmark_scores[0].value == 85.5
+
+    def test_missing_benchmark_is_none(self):
+        br = _make_benchmark_result(benchmark_id=1)
+        m = _make_ranked_model(benchmark_results=[br])
+        ranked = _make_ranked_lists(top_performance=[m])
+        cols = [{"benchmark_id": 99, "display_name": "Other", "weight": 1.0}]
+        tables = _build_tier_tables(ranked, cols)
+        assert tables[0].rows[0].benchmark_scores[0].value is None
+
+    def test_estimated_flag_set(self):
+        br = _make_benchmark_result(benchmark_id=1, is_estimated=True, source_url=None, estimation_note="est")
+        m = _make_ranked_model(benchmark_results=[br])
+        ranked = _make_ranked_lists(top_performance=[m])
+        cols = [{"benchmark_id": 1, "display_name": "HumanEval", "weight": 1.0}]
+        tables = _build_tier_tables(ranked, cols)
+        assert tables[0].rows[0].benchmark_scores[0].is_estimated is True
+
+
+# ---------------------------------------------------------------------------
+# TestBuildBenchmarksUsed
+# ---------------------------------------------------------------------------
+
+
+class TestBuildBenchmarksUsed:
+    def test_empty_when_no_judgments(self):
+        assert _build_benchmarks_used(None, []) == []
+
+    def test_excludes_no_match(self):
+        judgments = BenchmarkJudgments(judgments=[
+            BenchmarkJudgment(benchmark_id=1, relevance_class="no_match", short_rationale="no"),
+        ])
+        wb = [{"id": 1, "name_normalized": "A", "variant": None, "description": "desc"}]
+        result = _build_benchmarks_used(judgments, wb)
+        assert result == []
+
+    def test_includes_relevant_benchmarks(self):
+        judgments = BenchmarkJudgments(judgments=[
+            BenchmarkJudgment(benchmark_id=1, relevance_class="strong_match", short_rationale="yes"),
+        ])
+        wb = [{"id": 1, "name_normalized": "MMLU", "variant": "5-shot", "description": "General knowledge"}]
+        result = _build_benchmarks_used(judgments, wb)
+        assert len(result) == 1
+        assert result[0].benchmark_name == "MMLU (5-shot)"
+        assert result[0].weight == 0.75
+        assert result[0].description == "General knowledge"
+
+    def test_sorted_by_weight_desc(self):
+        judgments = BenchmarkJudgments(judgments=[
+            BenchmarkJudgment(benchmark_id=1, relevance_class="partial_match", short_rationale="a"),
+            BenchmarkJudgment(benchmark_id=2, relevance_class="perfect_match", short_rationale="b"),
+        ])
+        wb = [
+            {"id": 1, "name_normalized": "A", "variant": None, "description": "a"},
+            {"id": 2, "name_normalized": "B", "variant": None, "description": "b"},
         ]
-        model = _make_ranked_model(model_id=1, benchmark_results=benchmarks)
-        table = _build_comparison_table(_make_ranked_lists(top_performance=[model]))
-        bench_cols = [c for c in table.columns if c.startswith("Bench")]
-        assert len(bench_cols) == 6
-
-    def test_benchmark_variant_appended_to_column_name(self):
-        br = _make_benchmark_result(benchmark_name="MMLU", benchmark_variant="5-shot")
-        model = _make_ranked_model(benchmark_results=[br])
-        table = _build_comparison_table(_make_ranked_lists(top_performance=[model]))
-        assert "MMLU (5-shot)" in table.columns
-
-    def test_estimated_flag_yes_for_estimated_model(self):
-        br = _make_benchmark_result(is_estimated=True, source_url=None, estimation_note="note")
-        model = _make_ranked_model(benchmark_results=[br])
-        table = _build_comparison_table(_make_ranked_lists(top_performance=[model]))
-        est_col_idx = table.columns.index("Est?")
-        assert table.rows[0][est_col_idx] == "Yes"
-
-    def test_estimated_flag_no_for_non_estimated_model(self):
-        model = _make_ranked_model()
-        table = _build_comparison_table(_make_ranked_lists(top_performance=[model]))
-        est_col_idx = table.columns.index("Est?")
-        assert table.rows[0][est_col_idx] == "No"
-
-    def test_missing_benchmark_score_is_none_in_row(self):
-        br_a = _make_benchmark_result(benchmark_id=1, benchmark_name="BenchA", weight_used=0.9)
-        br_b = _make_benchmark_result(benchmark_id=2, benchmark_name="BenchB", weight_used=0.5)
-        model_ab = _make_ranked_model(model_id=1, name="has-both", benchmark_results=[br_a, br_b])
-        model_a = _make_ranked_model(model_id=2, name="has-a-only", benchmark_results=[br_a])
-        table = _build_comparison_table(_make_ranked_lists(top_performance=[model_ab, model_a]))
-
-        bench_b_idx = table.columns.index("BenchB")
-        row_a_only = next(r for r in table.rows if r[0] == "has-a-only")
-        assert row_a_only[bench_b_idx] is None
+        result = _build_benchmarks_used(judgments, wb)
+        assert result[0].weight > result[1].weight
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +534,7 @@ class TestPickRecommendationCards:
 class TestBuildFallbackSummary:
     def test_includes_intent_reasoning_when_present(self):
         state = _make_state(intent_extraction={"reasoning": "User needs legal RAG."})
-        summary = _build_fallback_summary(state, _make_ranked_lists())
+        summary = _build_fallback_summary(state)
         assert "User needs legal RAG." in summary
 
     def test_includes_intent_reasoning_from_object(self):
@@ -459,40 +542,18 @@ class TestBuildFallbackSummary:
 
         intent = SimpleNamespace(reasoning="Object-style reasoning.")
         state = _make_state(intent_extraction=intent)
-        summary = _build_fallback_summary(state, _make_ranked_lists())
+        summary = _build_fallback_summary(state)
         assert "Object-style reasoning." in summary
 
     def test_no_intent_no_task_section(self):
         state = _make_state(intent_extraction=None)
-        summary = _build_fallback_summary(state, _make_ranked_lists())
+        summary = _build_fallback_summary(state)
         assert "## Your Task" not in summary
-
-    def test_includes_model_names_from_ranked_lists(self):
-        m = _make_ranked_model(name="best-model", blended_score=0.9)
-        state = _make_state(intent_extraction=None)
-        summary = _build_fallback_summary(state, _make_ranked_lists(top_performance=[m]))
-        assert "best-model" in summary
 
     def test_fallback_message_when_no_data(self):
         state = _make_state(intent_extraction=None)
-        summary = _build_fallback_summary(state, _make_ranked_lists())
+        summary = _build_fallback_summary(state)
         assert "Analysis complete" in summary
-
-    def test_includes_reason_for_ranking(self):
-        m = _make_ranked_model(reason="Dominates HumanEval.")
-        state = _make_state(intent_extraction=None)
-        summary = _build_fallback_summary(state, _make_ranked_lists(top_performance=[m]))
-        assert "Dominates HumanEval." in summary
-
-    def test_top_3_models_per_category(self):
-        models = [_make_ranked_model(model_id=i, name=f"model-{i}") for i in range(5)]
-        state = _make_state(intent_extraction=None)
-        summary = _build_fallback_summary(state, _make_ranked_lists(top_performance=models))
-        # First 3 should appear, 4th and 5th should not
-        for i in range(3):
-            assert f"model-{i}" in summary
-        for i in range(3, 5):
-            assert f"model-{i}" not in summary
 
 
 # ---------------------------------------------------------------------------
@@ -507,11 +568,10 @@ class TestAssembleSummaryMarkdown:
         assert "## Your Task" in md
         assert "A legal RAG task." in md
 
-    def test_contains_recommendations_section(self):
-        llm_out = _default_llm_output(executive_summary="Model-A is best.")
+    def test_no_recommendations_section(self):
+        llm_out = _default_llm_output()
         md = _assemble_summary_markdown(llm_out)
-        assert "## Recommendations" in md
-        assert "Model-A is best." in md
+        assert "## Recommendations" not in md
 
     def test_calibration_note_included_when_present(self):
         llm_out = _default_llm_output(offset_calibration_note="Score for X was inferred.")
@@ -680,13 +740,14 @@ class TestSynthesisNode:
         result = synthesis_node(state, settings=_make_settings(_default_llm_output()))
         assert isinstance(result["final_response"], SynthesisOutput)
 
-    def test_comparison_table_populated(self):
+    def test_tier_tables_populated(self):
         ranked = self._ranked_with_two_models()
         state = _make_state(ranked_results=ranked)
         result = synthesis_node(state, settings=_make_settings(_default_llm_output()))
-        table = result["final_response"].comparison_table
-        assert table is not None
-        assert len(table.rows) == 2
+        tier_tables = result["final_response"].tier_tables
+        assert len(tier_tables) == 3
+        # top_performance has 1 model, balanced has 1, budget has 1
+        assert len(tier_tables[0].rows) == 1
 
     def test_citations_populated(self):
         br = _make_benchmark_result(source_url="http://cited.com")

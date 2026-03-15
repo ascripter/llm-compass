@@ -6,7 +6,10 @@ from .refine_query import QueryExpansion
 from .benchmark_judgment import BenchmarkJudgments
 from .ranking import BenchmarkResult, RankMetrics, RankedModel, RankedLists
 from .synthesis import (
-    ComparisonTable,
+    TierBenchmarkScore,
+    TierTableRow,
+    TierTable,
+    BenchmarkUsed,
     RecommendationCard,
     Citation,
     Warning,
@@ -23,7 +26,10 @@ __all__ = [
     "RankMetrics",
     "RankedModel",
     "RankedLists",
-    "ComparisonTable",
+    "TierBenchmarkScore",
+    "TierTableRow",
+    "TierTable",
+    "BenchmarkUsed",
     "RecommendationCard",
     "Citation",
     "Warning",
