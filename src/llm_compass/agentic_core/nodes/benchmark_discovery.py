@@ -33,7 +33,7 @@ def find_relevant_benchmarks(
         cutoff_score: Minimum relevance score to include
 
     Returns:
-        List of dicts: [{"score": 0.9, <BenchmarkDictionary keys/values>}, ...]
+        List of dicts: [{"weight": 0.9, <BenchmarkDictionary keys/values>}, ...]
     """
     embedding = get_embedding(settings)
 
@@ -69,17 +69,17 @@ def find_relevant_benchmarks(
             benchmark_scores[bench_id] = {
                 c.name: getattr(item, c.name) for c in item.__table__.columns
             }
-            benchmark_scores[bench_id]["score"] = 0.0
-        benchmark_scores[bench_id]["score"] = max(
-            round(score, 4), benchmark_scores[bench_id]["score"]
+            benchmark_scores[bench_id]["weight"] = 0.0
+        benchmark_scores[bench_id]["weight"] = max(
+            round(score, 4), benchmark_scores[bench_id]["weight"]
         )
 
-    results = [v for v in benchmark_scores.values() if v["score"] > cutoff_score]
-    results.sort(key=lambda v: -v["score"])
+    results = [v for v in benchmark_scores.values() if v["weight"] > cutoff_score]
+    results.sort(key=lambda v: -v["weight"])
     logger.debug(
         "Benchmarks found: "
         + " | ".join(
-            [f"score={_['score']}: {_['name_normalized']} ({_['variant']})" for _ in results]
+            [f"weight={_['weight']}: {_['name_normalized']} ({_['variant']})" for _ in results]
         )
     )
     logger.info(f"Found {len(results)} relevant benchmarks from {len(queries)} queries")
@@ -105,7 +105,7 @@ def benchmark_discovery_node(
         logs = [f"{len(results)} found via similarity search"]
         return {
             "weighted_benchmarks": results,
-            "average_benchmark_similarity": sum(_["score"] for _ in results) / len(results),
+            "average_benchmark_similarity": sum(_["weight"] for _ in results) / len(results) if results else 0.0,
             "logs": logs,
         }
     except Exception as e:
