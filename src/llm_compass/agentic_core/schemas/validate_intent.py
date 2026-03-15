@@ -94,7 +94,7 @@ class IntentExtraction(BaseModel):
                     "intended_input_modalities": [],
                     "intended_output_modalities": [],
                     "clarification_needed": [
-                        "What exact task do you want the model to perform?",
+                        "What task do you want the model to perform? A concise description suffices",
                         "What input modality will you provide: text, image, audio, or video?",
                         "What output modality do you expect from the model?",
                     ],
