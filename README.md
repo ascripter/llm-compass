@@ -3,32 +3,16 @@
 ## Setup (dev notes)
 - rename `.env.example` to `.env` and fill variables accordingly
 - `pip install -e .` in the repo root
-- Then run the following commands in 2 terminals
-  - `streamlit run src\llm_compass\ui\app.py`
-  - `fastapi dev src\llm_compass\api\main.py`
 
-## Data (dev notes)
-Build database initially via
+## Generata Database (dev notes)
+For MVP, data is not updated automatically. Import manually curated data into the project via (from repo root):
 - `python src/llm_compass/scripts/build_data.py` (Linux)
 - `python src\llm_compass\scripts\build_data.py` (Windows)
 
 Will store data in `storage/` (depending on settings in `.env`)
 
-**NOTE:** FK resolution from scores to benchmark / models still t.b.d.
-
-To fetch data from SQLite:
-
-```python
-    from llm_compass.config import get_settings
-    from llm_compass.data.database import Database
-    from llm_compass.data.models import BenchmarkDictionary, LLMMetadata, BenchmarkScore
-
-    settings = get_settings()  # load_dotenv() and storage path
-    db = Database(settings)
-    with db.SessionLocal() as session:
-        # SQLAlchemy code, i.e.
-        results = session.query(BenchmarkDictionary).filter_by(name_normalized="GPQA")
-        for row in results:
-            print(row.name_normalized, row.variant)
-```
+## Lauch App
+- Run the following commands in 2 terminals (from repo root):
+  - `streamlit run src\llm_compass\ui\app.py`
+  - `fastapi dev src\llm_compass\api\main.py`
 
