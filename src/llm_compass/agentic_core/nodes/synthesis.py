@@ -65,11 +65,13 @@ def _select_benchmark_columns(
             if bid is None:
                 continue
             info = bm_lookup.get(int(bid), {})
-            selected.append({
-                "benchmark_id": int(bid),
-                "display_name": info.get("display_name", str(bid)),
-                "weight": b.get("weight", 0.0),
-            })
+            selected.append(
+                {
+                    "benchmark_id": int(bid),
+                    "display_name": info.get("display_name", str(bid)),
+                    "weight": b.get("weight", 0.0),
+                }
+            )
         return selected
 
     # Group judgments by weight tier (descending)
@@ -108,7 +110,9 @@ def _format_speed(model: RankedModel) -> str:
     return sc
 
 
-def _find_estimation_source(model: RankedModel, target_name: str, target_variant: str | None) -> str | None:
+def _find_estimation_source(
+    model: RankedModel, target_name: str, target_variant: str | None
+) -> str | None:
     """Find the source benchmark variant that an estimated score was derived from."""
     for br in model.benchmark_results:
         if br.benchmark_name == target_name and not br.is_estimated:
@@ -151,26 +155,34 @@ def _build_tier_tables(
                 else:
                     est_source = None
                     if br.is_estimated:
-                        est_source = _find_estimation_source(m, br.benchmark_name, br.benchmark_variant)
-                    bench_scores.append(TierBenchmarkScore(
-                        value=round(br.score, 2),
-                        is_estimated=br.is_estimated,
-                        estimation_source=est_source,
-                    ))
+                        est_source = _find_estimation_source(
+                            m, br.benchmark_name, br.benchmark_variant
+                        )
+                    bench_scores.append(
+                        TierBenchmarkScore(
+                            value=round(br.score, 2),
+                            is_estimated=br.is_estimated,
+                            estimation_source=est_source,
+                        )
+                    )
 
-            rows.append(TierTableRow(
-                model_name=m.name_normalized,
-                provider=m.provider,
-                speed=_format_speed(m),
-                score=round(m.rank_metrics.blended_score, 3),
-                benchmark_scores=bench_scores,
-            ))
+            rows.append(
+                TierTableRow(
+                    model_name=m.name_normalized,
+                    provider=m.provider,
+                    speed=_format_speed(m),
+                    score=round(m.rank_metrics.blended_score, 3),
+                    benchmark_scores=bench_scores,
+                )
+            )
 
-        tables.append(TierTable(
-            tier_name=tier_name,
-            columns=column_names,
-            rows=rows,
-        ))
+        tables.append(
+            TierTable(
+                tier_name=tier_name,
+                columns=column_names,
+                rows=rows,
+            )
+        )
 
     return tables
 
@@ -204,11 +216,13 @@ def _build_benchmarks_used(
         variant = info.get("variant")
         display_name = f"{name} ({variant})" if variant else name
 
-        entries.append(BenchmarkUsed(
-            benchmark_name=display_name,
-            weight=j.relevance_weight,
-            description=info.get("description", ""),
-        ))
+        entries.append(
+            BenchmarkUsed(
+                benchmark_name=display_name,
+                weight=j.relevance_weight,
+                description=info.get("description", ""),
+            )
+        )
 
     entries.sort(key=lambda e: e.weight, reverse=True)
     return entries
@@ -311,6 +325,14 @@ def _pick_recommendation_cards(
             continue
         m = model_list[0]
         if m.model_id in seen:
+            cards.append(
+                RecommendationCard(
+                    category=label,
+                    model_name=m.name_normalized,
+                    reason="",
+                    blended_score=m.rank_metrics.blended_score,
+                )
+            )
             continue
         seen.add(m.model_id)
         reason = (

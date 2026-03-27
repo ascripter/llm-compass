@@ -13,6 +13,7 @@ class RecommendationCard(BaseModel):
     category: str
     model_name: str
     reason: str
+    blended_score: float | None = None
 
 
 class Citation(BaseModel):
