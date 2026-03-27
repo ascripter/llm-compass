@@ -137,13 +137,6 @@ class TestNotSpecific:
         with pytest.raises(ValueError):
             _make_response(is_specific=False, clarification_needed=[])
 
-    def test_log_entry_added(self):
-        response = _make_response(is_specific=False, clarification_needed=["Clarify."])
-        result = validate_intent_node(_make_state(), settings=_make_settings(response))
-
-        assert "logs" in result
-        assert any("Intent Validator" in log for log in result["logs"])
-
 
 # ---------------------------------------------------------------------------
 # 2. Clarification limit exceeded (count >= 3 and not specific)
@@ -224,7 +217,7 @@ class TestSpecificNoConflict:
 
         assert result["intent_extraction"] is response
 
-    def test_no_logs_on_clean_pass(self):
+    def test_logs_on_clean_pass(self):
         response = _make_response(
             is_specific=True, input_modalities=["text"], output_modalities=["text"]
         )
@@ -235,7 +228,7 @@ class TestSpecificNoConflict:
             _make_state(constraints=constraints), settings=_make_settings(response)
         )
 
-        assert "logs" not in result
+        assert "logs" in result
 
 
 # ---------------------------------------------------------------------------

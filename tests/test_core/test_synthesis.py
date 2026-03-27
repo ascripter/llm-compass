@@ -23,6 +23,7 @@ from llm_compass.agentic_core.schemas.benchmark_judgment import (
 )
 from llm_compass.agentic_core.schemas.ranking import (
     BenchmarkResult,
+    PerformanceCI,
     RankMetrics,
     RankedLists,
     RankedModel,
@@ -86,7 +87,9 @@ def _make_ranked_model(
         speed_tps=speed_tps,
         cost_null_fraction=cost_null_fraction,
         rank_metrics=RankMetrics(
-            performance_index=performance_index,
+            performance_index=PerformanceCI(
+                low=performance_index, mid=performance_index, high=performance_index
+            ),
             blended_cost_index=blended_cost_index,
             blended_score=blended_score,
         ),
@@ -341,7 +344,9 @@ class TestExtractCitations:
         assert citations == []
 
     def test_missing_url_excluded(self):
-        br = _make_benchmark_result(is_estimated=False, source_url=None)
+        # Non-estimated results without source_url are now forbidden by the schema validator.
+        # The closest valid scenario: estimated result with no source_url is also excluded.
+        br = _make_benchmark_result(is_estimated=True, source_url=None, estimation_note="est")
         model = _make_ranked_model(benchmark_results=[br])
         citations = _extract_citations(_make_ranked_lists(top_performance=[model]))
         assert citations == []
@@ -381,15 +386,12 @@ class TestExtractCitations:
 
 class TestGenerateWarnings:
     def test_no_warnings_for_clean_data(self):
-        model = _make_ranked_model(cost_null_fraction=0.0)
+        # FEW_CANDIDATES triggers when unique models < 5, so provide 5 unique models.
+        models = [_make_ranked_model(model_id=i, cost_null_fraction=0.0) for i in range(1, 6)]
         ranked = _make_ranked_lists(
-            top_performance=[
-                model,
-                _make_ranked_model(model_id=2),
-                _make_ranked_model(model_id=3),
-            ],
-            balanced=[model, _make_ranked_model(model_id=2), _make_ranked_model(model_id=3)],
-            budget=[model, _make_ranked_model(model_id=2), _make_ranked_model(model_id=3)],
+            top_performance=models,
+            balanced=models,
+            budget=models,
         )
         state = _make_state(best_benchmark_weight=0.9)
         warnings = _generate_warnings(state, ranked)
@@ -442,15 +444,17 @@ class TestGenerateWarnings:
         codes = [w.code for w in warnings]
         assert "FEW_CANDIDATES" not in codes
 
-    def test_few_candidates_not_triggered_for_three_models(self):
-        models = [_make_ranked_model(model_id=i) for i in range(3)]
+    def test_few_candidates_not_triggered_for_five_models(self):
+        # Threshold is < 5 unique models across all lists; exactly 5 should not trigger.
+        models = [_make_ranked_model(model_id=i) for i in range(5)]
         ranked = _make_ranked_lists(top_performance=models)
         warnings = _generate_warnings(_make_state(), ranked)
         codes = [w.code for w in warnings]
         assert "FEW_CANDIDATES" not in codes
 
     def test_warnings_from_multiple_lists(self):
-        # Only top-3 per list are checked for PARTIAL_COST_DATA / ESTIMATED_SCORES
+        # Models are deduplicated by model_id across all lists, so the same model
+        # appearing in all 3 lists generates only 1 PARTIAL_COST_DATA warning.
         model = _make_ranked_model(model_id=1, cost_null_fraction=0.8)
         ranked = _make_ranked_lists(
             top_performance=[model],
@@ -459,7 +463,7 @@ class TestGenerateWarnings:
         )
         warnings = _generate_warnings(_make_state(), ranked)
         partial_warnings = [w for w in warnings if w.code == "PARTIAL_COST_DATA"]
-        assert len(partial_warnings) == 3  # one per list
+        assert len(partial_warnings) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -769,7 +773,7 @@ class TestSynthesisNode:
         ranked = self._ranked_with_two_models()
         state = _make_state(ranked_results=ranked)
         result = synthesis_node(state, settings=_make_settings(_default_llm_output()))
-        assert any("generated final response" in log for log in result["logs"])
+        assert any("Generated final response" in log for log in result["logs"])
 
     def test_calibration_note_in_summary_when_estimated(self):
         br = _make_benchmark_result(

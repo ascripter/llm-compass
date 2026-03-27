@@ -196,7 +196,12 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
         for i, m in enumerate(ordered, 1):
             key = _key(m)
             rm = m.get("rank_metrics") or {}
-            perf_idx = rm.get("performance_index", 0.0)
+            perf_ci = rm.get("performance_index") or {}
+            perf_str = (
+                f"{perf_ci.get('low', 0.0):.3f}\u2013{perf_ci.get('high', 0.0):.3f}"
+                if perf_ci.get("low") != perf_ci.get("high")
+                else f"{perf_ci.get('mid', 0.0):.3f}"
+            )
             cost_idx = rm.get("blended_cost_index", 0.0)
             cost_null = m.get("cost_null_fraction") or 0.0
             cost_null_str = " ⚠" if cost_null > 0 else ""
@@ -205,7 +210,7 @@ def _build_intermediate_summary(state: dict[str, Any]) -> str:
             bal_str = f"{bal:.3f}" if bal is not None else "—"
             bud_str = f"{bud:.3f}" if bud is not None else "—"
             rows.append(
-                f"| {i} | {key} | {perf_idx:.3f} | {cost_idx:.3f}{cost_null_str} | {bal_str} | {bud_str} |"
+                f"| {i} | {key} | {perf_str} | {cost_idx:.3f}{cost_null_str} | {bal_str} | {bud_str} |"
             )
         parts.append("\n## Ranking Results\n\n" + "\n".join(rows))
 

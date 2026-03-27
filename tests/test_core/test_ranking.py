@@ -24,6 +24,7 @@ from llm_compass.data.models import Base, BenchmarkDictionary, BenchmarkScore, L
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def db_session():
     engine = create_engine("sqlite:///:memory:")
@@ -35,6 +36,7 @@ def db_session():
 # ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
+
 
 def make_model(session: Session, name: str = "test-model", **kwargs) -> LLMMetadata:
     defaults = dict(
@@ -61,7 +63,9 @@ def make_model(session: Session, name: str = "test-model", **kwargs) -> LLMMetad
     return model
 
 
-def make_benchmark(session: Session, name: str = "bench", variant: str = "", **kwargs) -> BenchmarkDictionary:
+def make_benchmark(
+    session: Session, name: str = "bench", variant: str = "", **kwargs
+) -> BenchmarkDictionary:
     benchmark = BenchmarkDictionary(
         name_normalized=name,
         variant=variant,
@@ -109,6 +113,7 @@ def _text_only_token_ratio() -> dict:
 # TestCalculateBlendedCost
 # ---------------------------------------------------------------------------
 
+
 class TestCalculateBlendedCost:
     def _model(self, **kwargs):
         defaults = dict(
@@ -147,8 +152,18 @@ class TestCalculateBlendedCost:
             cost_output_video_1s=8.0,
         )
         ratio = {
-            "normalized_input_ratios": {"text": 0.125, "image": 0.125, "audio": 0.125, "video": 0.125},
-            "normalized_output_ratios": {"text": 0.125, "image": 0.125, "audio": 0.125, "video": 0.125},
+            "normalized_input_ratios": {
+                "text": 0.125,
+                "image": 0.125,
+                "audio": 0.125,
+                "video": 0.125,
+            },
+            "normalized_output_ratios": {
+                "text": 0.125,
+                "image": 0.125,
+                "audio": 0.125,
+                "video": 0.125,
+            },
         }
         # numerator = 0.125*(1+3+5+7+2+4+6+8) = 0.125*36 = 4.5
         # non_null_weight = 1.0, so cost = 4.5
@@ -209,6 +224,7 @@ class TestCalculateBlendedCost:
 # TestNormalizeScores
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeScores:
     def test_normal_range(self):
         result = _normalize_scores_to_0_1([0.0, 50.0, 100.0])
@@ -234,6 +250,7 @@ class TestNormalizeScores:
 # ---------------------------------------------------------------------------
 # TestRetrieveAndRankModels
 # ---------------------------------------------------------------------------
+
 
 class TestRetrieveAndRankModels:
     def test_empty_db_returns_empty_lists(self, db_session):
@@ -303,8 +320,12 @@ class TestRetrieveAndRankModels:
     def test_budget_favours_low_cost(self, db_session):
         bench = make_benchmark(db_session)
         # cheap model has slightly lower perf but much lower cost
-        cheap = make_model(db_session, name="cheap", cost_input_text_1m=0.1, cost_output_text_1m=0.1)
-        expensive = make_model(db_session, name="expensive", cost_input_text_1m=100.0, cost_output_text_1m=100.0)
+        cheap = make_model(
+            db_session, name="cheap", cost_input_text_1m=0.1, cost_output_text_1m=0.1
+        )
+        expensive = make_model(
+            db_session, name="expensive", cost_input_text_1m=100.0, cost_output_text_1m=100.0
+        )
         make_score(db_session, cheap, bench, score_value=75.0)
         make_score(db_session, expensive, bench, score_value=80.0)
 
@@ -347,9 +368,11 @@ class TestRetrieveAndRankModels:
                 # Internal fields should not be top-level attributes on RankedModel
                 assert not hasattr(entry, "raw_performance_score")
                 assert not hasattr(entry, "blended_cost_1m_usd")
-                # performance_index and blended_cost_index live inside rank_metrics
+                # performance_index (PerformanceCI) and blended_cost_index live inside rank_metrics
                 assert entry.rank_metrics is not None
-                assert entry.rank_metrics.performance_index is not None
+                pi = entry.rank_metrics.performance_index
+                assert pi is not None
+                assert pi.low <= pi.mid <= pi.high
                 assert entry.rank_metrics.blended_cost_index is not None
                 # cost_null_fraction should survive into output
                 assert entry.cost_null_fraction is not None
@@ -359,8 +382,10 @@ class TestRetrieveAndRankModels:
         bench = make_benchmark(db_session)
         # Model with only input text cost, output text cost is None
         m = make_model(
-            db_session, name="partial-cost",
-            cost_input_text_1m=5.0, cost_output_text_1m=None,
+            db_session,
+            name="partial-cost",
+            cost_input_text_1m=5.0,
+            cost_output_text_1m=None,
         )
         make_score(db_session, m, bench, score_value=70.0)
 
@@ -378,8 +403,10 @@ class TestRetrieveAndRankModels:
         """Models with all cost fields present get cost_null_fraction == 0."""
         bench = make_benchmark(db_session)
         m = make_model(
-            db_session, name="full-cost",
-            cost_input_text_1m=1.0, cost_output_text_1m=2.0,
+            db_session,
+            name="full-cost",
+            cost_input_text_1m=1.0,
+            cost_output_text_1m=2.0,
         )
         make_score(db_session, m, bench, score_value=70.0)
 
@@ -465,7 +492,7 @@ class TestRetrieveAndRankModels:
 
         result = retrieve_and_rank_models(
             benchmark_weights=[{"id": bench.id, "weight": 1.0, "name": bench.name_normalized}],
-            constraints={"reasoning_model": True},
+            constraints={"min_reasoning_type": "native cot"},
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
@@ -482,7 +509,7 @@ class TestRetrieveAndRankModels:
 
         result = retrieve_and_rank_models(
             benchmark_weights=[{"id": bench.id, "weight": 1.0, "name": bench.name_normalized}],
-            constraints={"tool_calling": True},
+            constraints={"min_tool_calling": "standard"},
             token_ratio_estimation=_text_only_token_ratio(),
             session=db_session,
         )
@@ -538,6 +565,7 @@ class TestRetrieveAndRankModels:
 # TestBridgeModelCalibration
 # ---------------------------------------------------------------------------
 
+
 class TestBridgeModelCalibration:
     def test_no_bridge_models_returns_none(self, db_session):
         bench = make_benchmark(db_session, name="mmlu", variant="v1")
@@ -573,7 +601,7 @@ class TestBridgeModelCalibration:
 
         calib = result[bench_v1.id]
         assert calib is not None
-        median_offset, note = calib
+        median_offset, note, _calibrated_variant = calib
 
         # offset = scores[other_variant] - scores[target_variant] = v2 - v1
         # bridge A: 80 - 90 = -10, bridge B: 60 - 70 = -10, median = -10
@@ -588,17 +616,23 @@ class TestBridgeModelCalibration:
 # TestExecuteRanking
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteRanking:
     def test_populates_ranked_results(self, db_session):
         bench = make_benchmark(db_session)
         m = make_model(db_session)
         make_score(db_session, m, bench, score_value=80.0)
 
-        state = cast(AgentState, {
-            "weighted_benchmarks": [{"id": bench.id, "weight": 1.0, "name": bench.name_normalized}],
-            "constraints": {},
-            "token_ratio_estimation": _text_only_token_ratio(),
-        })
+        state = cast(
+            AgentState,
+            {
+                "weighted_benchmarks": [
+                    {"id": bench.id, "weight": 1.0, "name": bench.name_normalized}
+                ],
+                "constraints": {},
+                "token_ratio_estimation": _text_only_token_ratio(),
+            },
+        )
         config = {"configurable": {"session": db_session}}
         result = execute_ranking(state, config)
 
@@ -607,11 +641,14 @@ class TestExecuteRanking:
         assert result["ranked_results"].top_performance is not None
 
     def test_empty_weighted_benchmarks_returns_empty_lists(self, db_session):
-        state = cast(AgentState, {
-            "weighted_benchmarks": [],
-            "constraints": {},
-            "token_ratio_estimation": _text_only_token_ratio(),
-        })
+        state = cast(
+            AgentState,
+            {
+                "weighted_benchmarks": [],
+                "constraints": {},
+                "token_ratio_estimation": _text_only_token_ratio(),
+            },
+        )
         config = {"configurable": {"session": db_session}}
         result = execute_ranking(state, config)
 

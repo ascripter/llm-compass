@@ -17,7 +17,13 @@ from llm_compass.common.schemas import Constraints
 from llm_compass.common.types import MODALITY_VALUES
 from llm_compass.data.models import LLMMetadata, BenchmarkScore, BenchmarkDictionary
 from ..schemas import IntentExtraction, QueryExpansion, BenchmarkJudgments
-from ..schemas.ranking import BenchmarkResult, RankMetrics, RankedModel, RankedLists
+from ..schemas.ranking import (
+    BenchmarkResult,
+    PerformanceCI,
+    RankMetrics,
+    RankedModel,
+    RankedLists,
+)
 from ..state import AgentState
 from sqlalchemy import and_, or_, func
 import numpy as np
@@ -96,7 +102,7 @@ def _normalize_scores_to_0_1(scores: List[float]) -> List[float]:
 def _precompute_bridge_calibration(
     session: Session,
     benchmark_ids: List[int],
-) -> Tuple[Dict[int, Optional[Tuple[float, str]]], Dict[int, "BenchmarkDictionary"]]:
+) -> Tuple[Dict[int, Optional[Tuple[float, str, str]]], Dict[int, "BenchmarkDictionary"]]:
     """
     Pre-compute bridge model offsets once per benchmark_id.
 
@@ -174,17 +180,24 @@ def _precompute_bridge_calibration(
         bridge_ids_for_name = bridge_ids_by_name.get(bm.name_normalized, [])
 
         offsets = []
+        other_variants_used = []
         for bridge_model_id in bridge_ids_for_name:
             scores = bridge_scores_by_name_model.get((bm.name_normalized, bridge_model_id), {})
-            if len(scores) == 2 and bm.variant in scores:
+            if len(scores) >= 2 and bm.variant in scores:
                 other_variant = next(v for v in scores if v != bm.variant)
                 offsets.append(scores[other_variant] - scores[bm.variant])
+                other_variants_used.append(other_variant)
 
         if not offsets:
             result[bid] = None
         else:
             first_bridge_name = bridge_model_names.get(bridge_ids_for_name[0], "unknown")
-            result[bid] = (float(np.median(offsets)), first_bridge_name)
+            # Use the most common other_variant as the canonical calibration variant
+            # so the estimation block can do a precise variant-keyed lookup.
+            calibrated_other_variant = max(
+                set(other_variants_used), key=other_variants_used.count
+            )
+            result[bid] = (float(np.median(offsets)), first_bridge_name, calibrated_other_variant)
 
     return result, benchmark_orm
 
@@ -234,7 +247,9 @@ def retrieve_and_rank_models(
 
     min_tc = constraints.get("min_tool_calling")
     if min_tc and min_tc != "none":
-        allowed_tc = [k for k, v in _TOOL_CALLING_RANKS.items() if v >= _TOOL_CALLING_RANKS[min_tc]]
+        allowed_tc = [
+            k for k, v in _TOOL_CALLING_RANKS.items() if v >= _TOOL_CALLING_RANKS[min_tc]
+        ]
         query = query.filter(LLMMetadata.tool_calling.in_(allowed_tc))
 
     if "min_speed_class" in constraints and constraints["min_speed_class"] == "medium":
@@ -300,6 +315,7 @@ def retrieve_and_rank_models(
             BenchmarkScore.model_id,
             BenchmarkScore.score_value,
             BenchmarkDictionary.name_normalized,
+            BenchmarkDictionary.variant,
         )
         .join(BenchmarkDictionary)
         .filter(
@@ -311,10 +327,10 @@ def retrieve_and_rank_models(
         )
         .all()
     )
-    # Keep max score per (model_id, name_normalized) — matches original semantics.
-    other_variant_scores: Dict[Tuple[int, str], float] = {}
-    for model_id, score_value, name_normalized in other_variant_rows:
-        key = (model_id, name_normalized)
+    # Keep max score per (model_id, name_normalized, variant) for precise variant-keyed lookup.
+    other_variant_scores: Dict[Tuple[int, str, str], float] = {}
+    for model_id, score_value, name_normalized, variant in other_variant_rows:
+        key = (model_id, name_normalized, variant)
         if key not in other_variant_scores or score_value > other_variant_scores[key]:
             other_variant_scores[key] = score_value
 
@@ -349,9 +365,11 @@ def retrieve_and_rank_models(
                 # Try bridge model calibration
                 calib = bridge_calibration.get(benchmark_id)
                 if calib is not None:
-                    median_offset, bridge_model_name = calib
+                    median_offset, bridge_model_name, calibrated_other_variant = calib
                     bm = benchmark_orm[benchmark_id]
-                    other_score = other_variant_scores.get((model.id, bm.name_normalized))
+                    other_score = other_variant_scores.get(
+                        (model.id, bm.name_normalized, calibrated_other_variant)
+                    )
                     if other_score is not None:
                         estimated_score = other_score - median_offset
                         benchmark_results.append(
@@ -402,7 +420,7 @@ def retrieve_and_rank_models(
             },
         )
 
-    # Step 5a: Per-benchmark score normalization → Performance_Index
+    # Step 5a: Per-benchmark score normalization → PerformanceCI
     # Collect all raw scores per benchmark across models that have data for it.
     bm_scores_across_models: Dict[int, List[float]] = {}
     for mr in model_results:
@@ -414,16 +432,58 @@ def retrieve_and_rank_models(
         bid: (min(scores), max(scores)) for bid, scores in bm_scores_across_models.items()
     }
 
-    # Compute per-model performance_index = weighted average of per-benchmark normalized scores.
+    # Pre-compute normalized score per (model_id, benchmark_id) for models with data.
+    present_norm: Dict[Tuple[int, int], float] = {}
     for mr in model_results:
-        weighted_sum = 0.0
-        weight_used = 0.0
-        for bid, raw_score, weight in mr["raw_bm_contributions"]:
+        for bid, raw_score, _ in mr["raw_bm_contributions"]:
             min_s, max_s = bm_min_max[bid]
-            norm_score = 0.5 if max_s == min_s else (raw_score - min_s) / (max_s - min_s)
-            weighted_sum += norm_score * weight
-            weight_used += weight
-        mr["performance_index"] = weighted_sum / weight_used if weight_used > 0 else 0.0
+            present_norm[(mr["model_id"], bid)] = (
+                0.5 if max_s == min_s else (raw_score - min_s) / (max_s - min_s)
+            )
+
+    # Per-benchmark Q25/Q75 of normalized scores — used as data-driven bounds for models
+    # that are missing a benchmark.  Reflects the actual score distribution rather than
+    # the fixed 0.25/0.75 heuristic.  Falls back to 0.25/0.75 only when a benchmark has
+    # no normalized scores at all (degenerate; shouldn't occur given FK constraints).
+    bm_norm_scores: Dict[int, List[float]] = {}
+    for (model_id, bid), norm_val in present_norm.items():
+        bm_norm_scores.setdefault(bid, []).append(norm_val)
+
+    bm_q25: Dict[int, float] = {}
+    bm_q75: Dict[int, float] = {}
+    for bid, norm_vals in bm_norm_scores.items():
+        q25, q75 = np.percentile(norm_vals, [25, 75])
+        bm_q25[bid] = float(q25)
+        bm_q75[bid] = float(q75)
+
+    # Compute PerformanceCI for each model.
+    # All models use the same denominator (total_weight) so CIs are directly comparable.
+    # Missing benchmarks contribute Q25 (low) / Q75 (high) of the benchmark's normalized
+    # score distribution to bound the unknown — data-driven rather than fixed 0.25/0.75.
+    total_weight = sum(bw["weight"] for bw in benchmark_weights)
+    for mr in model_results:
+        weighted_low = 0.0
+        weighted_high = 0.0
+        for bw in benchmark_weights:
+            bid = bw["id"]
+            weight = bw["weight"]
+            norm = present_norm.get((mr["model_id"], bid))
+            if norm is not None:
+                weighted_low += norm * weight
+                weighted_high += norm * weight
+            else:
+                weighted_low += bm_q25.get(bid, 0.25) * weight
+                weighted_high += bm_q75.get(bid, 0.75) * weight
+        if total_weight > 0:
+            perf_low = weighted_low / total_weight
+            perf_high = weighted_high / total_weight
+        else:
+            perf_low = perf_high = 0.0
+        mr["performance_index"] = {
+            "low": perf_low,
+            "mid": (perf_low + perf_high) / 2,
+            "high": perf_high,
+        }
 
     # Step 5b: Blended cost normalization (lower cost → higher index, i.e. better).
     blended_costs = [mr["blended_cost_1m_usd"] for mr in model_results]
@@ -452,7 +512,7 @@ def retrieve_and_rank_models(
             speed_tps=mr["speed_tps"],
             cost_null_fraction=mr["cost_null_fraction"],
             rank_metrics=RankMetrics(
-                performance_index=mr["performance_index"],
+                performance_index=PerformanceCI(**mr["performance_index"]),
                 blended_cost_index=mr["blended_cost_index"],
                 blended_score=blended_score,
             ),
@@ -463,35 +523,40 @@ def retrieve_and_rank_models(
     balanced_w = constraints.get("balanced_perf_weight", 0.5)
     budget_w = constraints.get("budget_perf_weight", 0.2)
 
-    # Performance List: Ranked by Performance_Index
-    perf_sorted = sorted(model_results, key=lambda x: x["performance_index"], reverse=True)
-    top_performance = [_to_ranked_model(mr, mr["performance_index"], "") for mr in perf_sorted]
+    # Performance List: Ranked by performance_index.mid
+    perf_sorted = sorted(model_results, key=lambda x: x["performance_index"]["mid"], reverse=True)
+    top_performance = [
+        _to_ranked_model(mr, mr["performance_index"]["mid"], "") for mr in perf_sorted
+    ]
 
-    # Budget List: Ranked by budget_w * Performance_Index + (1 - budget_w) * Blended_Cost_Index
+    # Budget List: Ranked by budget_w * performance_index.mid + (1 - budget_w) * blended_cost_index
     budget_sorted = sorted(
         model_results,
-        key=lambda x: budget_w * x["performance_index"] + (1 - budget_w) * x["blended_cost_index"],
+        key=lambda x: budget_w * x["performance_index"]["mid"]
+        + (1 - budget_w) * x["blended_cost_index"],
         reverse=True,
     )
     budget = [
         _to_ranked_model(
             mr,
-            budget_w * mr["performance_index"] + (1 - budget_w) * mr["blended_cost_index"],
+            budget_w * mr["performance_index"]["mid"] + (1 - budget_w) * mr["blended_cost_index"],
             "",
         )
         for mr in budget_sorted
     ]
 
-    # Balanced List: Ranked by balanced_w * Performance_Index + (1 - balanced_w) * Blended_Cost_Index
+    # Balanced List: Ranked by balanced_w * performance_index.mid + (1 - balanced_w) * blended_cost_index
     balanced_sorted = sorted(
         model_results,
-        key=lambda x: balanced_w * x["performance_index"] + (1 - balanced_w) * x["blended_cost_index"],
+        key=lambda x: balanced_w * x["performance_index"]["mid"]
+        + (1 - balanced_w) * x["blended_cost_index"],
         reverse=True,
     )
     balanced = [
         _to_ranked_model(
             mr,
-            balanced_w * mr["performance_index"] + (1 - balanced_w) * mr["blended_cost_index"],
+            balanced_w * mr["performance_index"]["mid"]
+            + (1 - balanced_w) * mr["blended_cost_index"],
             "",
         )
         for mr in balanced_sorted
@@ -580,5 +645,5 @@ def execute_ranking(state: AgentState, config: RunnableConfig) -> dict:
         len(ranked_results.metadata.get("benchmarks_used", [])),
     )
 
-    logs = [f"{top_n} matched UI filter"]
+    logs = [f"{top_n} matched UI filter and have score data"]
     return {"ranked_results": ranked_results, "logs": logs}

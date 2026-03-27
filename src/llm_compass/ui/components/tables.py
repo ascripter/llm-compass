@@ -33,6 +33,10 @@ _TABLE_CSS = """
     font-style: italic;
     opacity: 0.6;
 }
+.tier-table .score-col[title] {
+    cursor: help;
+    text-decoration: underline dotted rgba(128,128,128,0.6);
+}
 /* ── Shared column styles ── */
 .score-col {
     font-weight: 600;
@@ -100,18 +104,30 @@ def _render_tier_table(tier: dict) -> None:
             speed = row.get("speed", "")
             score = row.get("score", 0)
             bench_scores = row.get("benchmark_scores", [])
+            _sci = row.get("score_ci")  # dict or None
+            ci_low = _sci.get("low") if isinstance(_sci, dict) else None
+            ci_high = _sci.get("high") if isinstance(_sci, dict) else None
         else:
             model_name = row.model_name
             provider = row.provider
             speed = row.speed
             score = row.score
             bench_scores = row.benchmark_scores
+            _sci = row.score_ci  # ScoreCI or None
+            ci_low = _sci.low if _sci is not None else None
+            ci_high = _sci.high if _sci is not None else None
+
+        # Build Score cell — add tooltip when CI is a genuine interval (low < high)
+        if ci_low is not None and ci_high is not None and ci_low < ci_high:
+            ci_title = f' title="~ {ci_low:.3f} – {ci_high:.3f}\n(due to missing score data)"'
+        else:
+            ci_title = ""
 
         parts.append("<tr>")
         parts.append(f"<td>{_esc(model_name)}</td>")
         parts.append(f"<td>{_esc(provider)}</td>")
         parts.append(f"<td>{_esc(speed)}</td>")
-        parts.append(f'<td class="score-col">{score:.3f}</td>')
+        parts.append(f'<td class="score-col"{ci_title}>{score:.3f}</td>')
 
         for bs in bench_scores:
             if isinstance(bs, dict):

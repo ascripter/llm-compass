@@ -21,6 +21,7 @@ from ..schemas.synthesis import (
     RecommendationReasons,
     SynthesisLLMOutput,
     SynthesisOutput,
+    ScoreCI,
     TierBenchmarkScore,
     TierTable,
     TierTableRow,
@@ -146,12 +147,20 @@ def _build_tier_tables(
         ),
     }
 
+    # Map each tier to its performance weight for CI propagation
+    tier_perf_weights: dict[str, float] = {
+        "top_performance": 1.0,
+        "balanced": balanced_perf_weight,
+        "budget": budget_perf_weight,
+    }
+
     tables: list[TierTable] = []
     for tier_key, tier_name, model_list in [
         ("top_performance", "Top Performance", ranked.top_performance),
         ("balanced", "Balanced", ranked.balanced),
         ("budget", "Budget Picks", ranked.budget),
     ]:
+        perf_w = tier_perf_weights[tier_key]
         top5 = sorted(model_list[:5], key=lambda m: m.rank_metrics.blended_score, reverse=True)
 
         rows: list[TierTableRow] = []
@@ -180,12 +189,20 @@ def _build_tier_tables(
                         )
                     )
 
+            # Propagate PerformanceCI through the blended formula:
+            #   blended_low/high = perf_w * perf.low/high + (1 - perf_w) * cost_index
+            pi = m.rank_metrics.performance_index
+            cost_idx = m.rank_metrics.blended_cost_index
+            sc_low = round(perf_w * pi.low + (1.0 - perf_w) * cost_idx, 3)
+            sc_high = round(perf_w * pi.high + (1.0 - perf_w) * cost_idx, 3)
+
             rows.append(
                 TierTableRow(
                     model_name=m.name_normalized,
                     provider=m.provider,
                     speed=_format_speed(m),
                     score=round(m.rank_metrics.blended_score, 3),
+                    score_ci=ScoreCI(low=sc_low, high=sc_high),
                     benchmark_scores=bench_scores,
                 )
             )
@@ -283,32 +300,38 @@ def _generate_warnings(state: dict[str, Any], ranked: RankedLists) -> list[Warni
             )
         )
 
-    # Check top-3 models across all lists for cost and estimation issues
-    for label, model_list in [
-        ("top_performance", ranked.top_performance),
-        ("balanced", ranked.balanced),
-        ("budget", ranked.budget),
-    ]:
+    # Check top-5 models across all lists for cost and estimation issues
+    models_list_shown = []
+    models_list_shown_ids = []
+    for model_list in [ranked.top_performance, ranked.balanced, ranked.budget]:
         for m in model_list[:5]:
-            if m.cost_null_fraction is not None and m.cost_null_fraction > 0.3:
-                warnings.append(
-                    Warning(
-                        code="PARTIAL_COST_DATA",
-                        message=f"{m.name_normalized} ({label}) has {m.cost_null_fraction:.0%} "
-                        "missing cost data; cost ranking may be unreliable.",
-                    )
+            if m.model_id not in models_list_shown_ids:
+                models_list_shown.append(m)
+                models_list_shown_ids.append(m.model_id)
+    for m in models_list_shown:
+        if m.cost_null_fraction is not None and m.cost_null_fraction > 0.3:
+            warnings.append(
+                Warning(
+                    code="PARTIAL_COST_DATA",
+                    message=f"{m.name_normalized} has {m.cost_null_fraction:.0%} "
+                    "missing cost data; cost ranking may be unreliable.",
                 )
-            if any(br.is_estimated for br in m.benchmark_results):
-                warnings.append(
-                    Warning(
-                        code="ESTIMATED_SCORES",
-                        message=f"{m.name_normalized} ({label}) uses estimated benchmark scores.",
-                    )
+            )
+        if any(br.is_estimated for br in m.benchmark_results):
+            warnings.append(
+                Warning(
+                    code="ESTIMATED_SCORES",
+                    message=f"{m.name_normalized} uses estimated benchmark scores.",
                 )
+            )
 
-    if 0 < len(ranked.top_performance) < 5:
-        n = len(ranked.top_performance)
-        msg = "Only 1 model fits filter criteria." if n == 1 else f"Only {n} models fit filter criteria."
+    if 0 < len(models_list_shown) < 5:
+        n = len(models_list_shown)
+        msg = (
+            "Only 1 model fits filter criteria."
+            if n == 1
+            else f"Only {n} models fit filter criteria."
+        )
         warnings.append(Warning(code="FEW_CANDIDATES", message=msg))
 
     return warnings
@@ -336,14 +359,6 @@ def _pick_recommendation_cards(
             continue
         m = model_list[0]
         if m.model_id in seen:
-            cards.append(
-                RecommendationCard(
-                    category=label,
-                    model_name=m.name_normalized,
-                    reason="",
-                    blended_score=m.rank_metrics.blended_score,
-                )
-            )
             continue
         seen.add(m.model_id)
         reason = (
@@ -414,10 +429,14 @@ def _build_ranking_context(ranked: RankedLists) -> str:
         lines.append(f"\n### {label}")
         for i, m in enumerate(model_list[:3], 1):
             rm = m.rank_metrics
+            pi = rm.performance_index
+            perf_str = (
+                f"{pi.mid:.3f}" if pi.low == pi.high else f"{pi.low:.3f}\u2013{pi.high:.3f}"
+            )
             provider_str = f" ({m.provider})" if m.provider else ""
             lines.append(
                 f"{i}. {m.name_normalized}{provider_str}"
-                f" | perf={rm.performance_index:.3f}"
+                f" | perf={perf_str}"
                 f" | cost_idx={rm.blended_cost_index:.3f}"
                 f" | blended={rm.blended_score:.3f}"
             )
@@ -491,8 +510,7 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
         return {
             "final_response": SynthesisOutput(
                 summary_markdown=(
-                    "No models matched filter criteria. "
-                    "Please loosen your constraints."
+                    "No models matched filter criteria. " "Please loosen your constraints."
                 ),
                 warnings=[
                     Warning(
@@ -556,8 +574,7 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
     try:
         llm_output = _invoke_synthesis_llm(state, ranked, settings)
         logger.debug(
-            "synthesis_node LLM | task_summary_len=%d"
-            " | reasons_keys=%s | calibration_note=%s",
+            "synthesis_node LLM | task_summary_len=%d" " | reasons_keys=%s | calibration_note=%s",
             len(llm_output.task_summary),
             [
                 k
@@ -566,12 +583,12 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
             ],
             llm_output.offset_calibration_note is not None,
         )
-        logs.append("Synthesis: LLM generated summary.")
+        logs.append("Generated summary")
     except Exception:
         logger.exception(
             "synthesis_node | LLM call failed; falling back to deterministic summary"
         )
-        logs.append("Synthesis: LLM call failed, using deterministic fallback.")
+        logs.append("LLM call failed, using deterministic fallback.")
 
     # --- Recommendation cards (use LLM reasons when available) ---
     recommendation_cards = _pick_recommendation_cards(
@@ -603,7 +620,7 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
         len(warnings),
     )
 
-    logs.append("Synthesis: generated final response.")
+    logs.append("Generated final response")
     return {
         "final_response": output,
         "logs": logs,

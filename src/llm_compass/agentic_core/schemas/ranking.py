@@ -25,8 +25,22 @@ class BenchmarkResult(BaseModel):
         return self
 
 
+class PerformanceCI(BaseModel):
+    """Confidence interval for performance_index reflecting uncertainty from missing benchmark data.
+
+    Models with full benchmark coverage will have low == mid == high (point estimate).
+    For models missing some benchmarks, the interval widens: low assumes 0.25 and high
+    assumes 0.75 for each missing benchmark's normalized score. Use mid (0.5 assumption)
+    for sorting and blended score computation.
+    """
+
+    low: float = Field(ge=0.0, le=1.0, description="Pessimistic: missing benchmarks scored 0.25")
+    mid: float = Field(ge=0.0, le=1.0, description="Neutral midpoint, used for sorting (0.50 for missing)")
+    high: float = Field(ge=0.0, le=1.0, description="Optimistic: missing benchmarks scored 0.75")
+
+
 class RankMetrics(BaseModel):
-    performance_index: float
+    performance_index: PerformanceCI
     blended_cost_index: float
     blended_score: float
 
