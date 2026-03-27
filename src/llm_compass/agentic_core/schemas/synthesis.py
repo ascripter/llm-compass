@@ -48,6 +48,7 @@ class TierTableRow(BaseModel):
 
 class TierTable(BaseModel):
     tier_name: str      # "Top Performance", "Balanced", "Budget Picks"
+    caption: str = ""   # dynamically generated from ranking weights
     columns: List[str]  # benchmark column display names
     rows: List[TierTableRow] = []
 

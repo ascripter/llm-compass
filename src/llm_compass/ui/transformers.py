@@ -25,6 +25,8 @@ def sidebar_to_constraints(sidebar: dict[str, Any]) -> dict[str, Any]:
         "reasoning_type": "standard" if sidebar.get("Reasoning") else "none",
         "require_tool_calling": bool(sidebar.get("Tool Calling")),
         "min_speed_class": _SPEED_MAP.get(sidebar.get("Speed", "Any/Slow+"), None),
+        "balanced_perf_weight": sidebar.get("Perf vs Cost", 50) / 100,
+        "budget_perf_weight": sidebar.get("Budget Profile", 20) / 100,
     }
 
 

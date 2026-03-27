@@ -453,35 +453,38 @@ def retrieve_and_rank_models(
             reason_for_ranking=reason,
         )
 
+    balanced_w = constraints.get("balanced_perf_weight", 0.5)
+    budget_w = constraints.get("budget_perf_weight", 0.2)
+
     # Performance List: Ranked by Performance_Index
     perf_sorted = sorted(model_results, key=lambda x: x["performance_index"], reverse=True)
     top_performance = [_to_ranked_model(mr, mr["performance_index"], "") for mr in perf_sorted]
 
-    # Budget List: Ranked by 0.2 * Performance_Index + 0.8 * Blended_Cost_Index
+    # Budget List: Ranked by budget_w * Performance_Index + (1 - budget_w) * Blended_Cost_Index
     budget_sorted = sorted(
         model_results,
-        key=lambda x: 0.2 * x["performance_index"] + 0.8 * x["blended_cost_index"],
+        key=lambda x: budget_w * x["performance_index"] + (1 - budget_w) * x["blended_cost_index"],
         reverse=True,
     )
     budget = [
         _to_ranked_model(
             mr,
-            0.2 * mr["performance_index"] + 0.8 * mr["blended_cost_index"],
+            budget_w * mr["performance_index"] + (1 - budget_w) * mr["blended_cost_index"],
             "",
         )
         for mr in budget_sorted
     ]
 
-    # Balanced List: Ranked by 0.5 * Performance_Index + 0.5 * Blended_Cost_Index
+    # Balanced List: Ranked by balanced_w * Performance_Index + (1 - balanced_w) * Blended_Cost_Index
     balanced_sorted = sorted(
         model_results,
-        key=lambda x: 0.5 * x["performance_index"] + 0.5 * x["blended_cost_index"],
+        key=lambda x: balanced_w * x["performance_index"] + (1 - balanced_w) * x["blended_cost_index"],
         reverse=True,
     )
     balanced = [
         _to_ranked_model(
             mr,
-            0.5 * mr["performance_index"] + 0.5 * mr["blended_cost_index"],
+            balanced_w * mr["performance_index"] + (1 - balanced_w) * mr["blended_cost_index"],
             "",
         )
         for mr in balanced_sorted

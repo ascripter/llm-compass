@@ -69,7 +69,7 @@ def _render_tier_table(tier: dict) -> None:
     rows = tier.get("rows", [])
 
     st.markdown(f"### {_esc(tier_name)}")
-    caption = _TIER_CAPTIONS.get(tier_name)
+    caption = tier.get("caption") or _TIER_CAPTIONS.get(tier_name)
     if caption:
         st.caption(caption)
 

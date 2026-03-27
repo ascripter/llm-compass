@@ -23,3 +23,5 @@ class Constraints(BaseModel):
     reasoning_type: Optional[ReasoningType] = None
     require_tool_calling: bool = False
     min_speed_class: Optional[SpeedClass] = None
+    balanced_perf_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    budget_perf_weight: float = Field(default=0.2, ge=0.0, le=1.0)

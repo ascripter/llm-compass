@@ -127,10 +127,24 @@ def _find_estimation_source(
 def _build_tier_tables(
     ranked: RankedLists,
     selected_columns: list[dict],
+    balanced_perf_weight: float = 0.5,
+    budget_perf_weight: float = 0.2,
 ) -> list[TierTable]:
     """Build 3 TierTable objects (Top Performance, Balanced, Budget Picks)."""
     column_ids = [c["benchmark_id"] for c in selected_columns]
     column_names = [c["display_name"] for c in selected_columns]
+
+    captions = {
+        "Top Performance": "Pure benchmark performance, cost ignored.",
+        "Balanced": (
+            f"Weighted {balanced_perf_weight:.0%} performance, "
+            f"{1 - balanced_perf_weight:.0%} cost (normalized)"
+        ),
+        "Budget Picks": (
+            f"Weighted {budget_perf_weight:.0%} performance, "
+            f"{1 - budget_perf_weight:.0%} cost (normalized)"
+        ),
+    }
 
     tables: list[TierTable] = []
     for tier_key, tier_name, model_list in [
@@ -179,6 +193,7 @@ def _build_tier_tables(
         tables.append(
             TierTable(
                 tier_name=tier_name,
+                caption=captions.get(tier_name, ""),
                 columns=column_names,
                 rows=rows,
             )
@@ -492,9 +507,16 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
     benchmark_judgments = _parse_benchmark_judgments(state)
     weighted_benchmarks = state.get("weighted_benchmarks", [])
 
+    # --- Extract ranking weights from constraints ---
+    constraints_val = state.get("constraints") or {}
+    if hasattr(constraints_val, "model_dump"):
+        constraints_val = constraints_val.model_dump()
+    balanced_w = constraints_val.get("balanced_perf_weight", 0.5)
+    budget_w = constraints_val.get("budget_perf_weight", 0.2)
+
     # --- Deterministic components (always built) ---
     selected_columns = _select_benchmark_columns(benchmark_judgments, weighted_benchmarks)
-    tier_tables = _build_tier_tables(ranked, selected_columns)
+    tier_tables = _build_tier_tables(ranked, selected_columns, balanced_w, budget_w)
     benchmarks_used = _build_benchmarks_used(benchmark_judgments, weighted_benchmarks)
     citations = _extract_citations(ranked)
     warnings = _generate_warnings(state, ranked)
