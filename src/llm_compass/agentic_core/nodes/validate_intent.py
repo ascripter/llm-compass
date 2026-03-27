@@ -194,7 +194,7 @@ def validate_intent_node(state: AgentState, *, settings: Settings) -> dict[str, 
                 msg += "Please clarify the following points:\n" + "\n".join(
                     f"- {q}" for q in response.clarification_needed
                 )
-            logs.append("Response not specific")
+            logs.append("Input not specific")
             msg += "\n\n"
 
         if first_ui_mismatch:
