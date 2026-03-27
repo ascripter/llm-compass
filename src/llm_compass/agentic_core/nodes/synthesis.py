@@ -289,7 +289,7 @@ def _generate_warnings(state: dict[str, Any], ranked: RankedLists) -> list[Warni
         ("balanced", ranked.balanced),
         ("budget", ranked.budget),
     ]:
-        for m in model_list[:3]:
+        for m in model_list[:5]:
             if m.cost_null_fraction is not None and m.cost_null_fraction > 0.3:
                 warnings.append(
                     Warning(
@@ -306,14 +306,10 @@ def _generate_warnings(state: dict[str, Any], ranked: RankedLists) -> list[Warni
                     )
                 )
 
-        if 0 < len(model_list) < 3:
-            warnings.append(
-                Warning(
-                    code="FEW_CANDIDATES",
-                    message=f"Only {len(model_list)} model(s) in the {label} list "
-                    "(fewer than the expected 3).",
-                )
-            )
+    if 0 < len(ranked.top_performance) < 5:
+        n = len(ranked.top_performance)
+        msg = "Only 1 model fits filter criteria." if n == 1 else f"Only {n} models fit filter criteria."
+        warnings.append(Warning(code="FEW_CANDIDATES", message=msg))
 
     return warnings
 
@@ -489,6 +485,28 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
         ranked = ranked_raw
 
     has_models = bool(ranked.top_performance or ranked.balanced or ranked.budget)
+
+    if not has_models:
+        logger.warning("synthesis_node | no ranked models — returning empty result")
+        return {
+            "final_response": SynthesisOutput(
+                summary_markdown=(
+                    "No models matched filter criteria. "
+                    "Please loosen your constraints."
+                ),
+                warnings=[
+                    Warning(
+                        code="NO_MODELS",
+                        message=(
+                            "No models matched filter criteria. "
+                            "Please loosen your constraints."
+                        ),
+                    )
+                ],
+            ),
+            "logs": ["Synthesis: skipped — no models matched filter criteria."],
+        }
+
     has_estimated = _has_estimated_scores(ranked)
 
     logger.debug(
@@ -535,28 +553,25 @@ def synthesis_node(state: AgentState, settings: Settings) -> dict:
     llm_output: SynthesisLLMOutput | None = None
     logs: list[str] = []
 
-    if not has_models:
-        logger.warning("synthesis_node | no ranked models — skipping LLM call, using fallback")
-    else:
-        try:
-            llm_output = _invoke_synthesis_llm(state, ranked, settings)
-            logger.debug(
-                "synthesis_node LLM | task_summary_len=%d"
-                " | reasons_keys=%s | calibration_note=%s",
-                len(llm_output.task_summary),
-                [
-                    k
-                    for k in ("top_performance", "balanced", "budget")
-                    if getattr(llm_output.recommendation_reasons, k, None)
-                ],
-                llm_output.offset_calibration_note is not None,
-            )
-            logs.append("Synthesis: LLM generated summary.")
-        except Exception:
-            logger.exception(
-                "synthesis_node | LLM call failed; falling back to deterministic summary"
-            )
-            logs.append("Synthesis: LLM call failed, using deterministic fallback.")
+    try:
+        llm_output = _invoke_synthesis_llm(state, ranked, settings)
+        logger.debug(
+            "synthesis_node LLM | task_summary_len=%d"
+            " | reasons_keys=%s | calibration_note=%s",
+            len(llm_output.task_summary),
+            [
+                k
+                for k in ("top_performance", "balanced", "budget")
+                if getattr(llm_output.recommendation_reasons, k, None)
+            ],
+            llm_output.offset_calibration_note is not None,
+        )
+        logs.append("Synthesis: LLM generated summary.")
+    except Exception:
+        logger.exception(
+            "synthesis_node | LLM call failed; falling back to deterministic summary"
+        )
+        logs.append("Synthesis: LLM call failed, using deterministic fallback.")
 
     # --- Recommendation cards (use LLM reasons when available) ---
     recommendation_cards = _pick_recommendation_cards(
@@ -601,7 +616,7 @@ def _invoke_synthesis_llm(
     settings: Settings,
 ) -> SynthesisLLMOutput:
     """Call the LLM to produce the natural-language synthesis components."""
-    llm = settings.make_llm("openai/gpt-4o-mini", temperature=0.3)
+    llm = settings.make_llm("openai/gpt-5-mini", temperature=0.3)
     structured_llm = llm.with_structured_output(SynthesisLLMOutput)
 
     # Build context for the LLM
