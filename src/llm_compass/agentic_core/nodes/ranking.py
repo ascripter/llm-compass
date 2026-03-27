@@ -25,6 +25,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+_REASONING_RANKS: Dict[str, int] = {"none": 0, "standard": 1, "native cot": 2}
+_TOOL_CALLING_RANKS: Dict[str, int] = {"none": 0, "standard": 1, "agentic": 2}
+
 # Unit suffix per modality — must match LLMMetadata column naming convention
 _COST_UNIT_SUFFIX: Dict[str, str] = {
     "text": "1m",
@@ -224,11 +227,15 @@ def retrieve_and_rank_models(
         elif constraints["deployment"] == "cloud":
             query = query.filter(LLMMetadata.is_open_weights == False)
 
-    if "reasoning_model" in constraints and constraints["reasoning_model"]:
-        query = query.filter(LLMMetadata.reasoning_type != "none")
+    min_rt = constraints.get("min_reasoning_type")
+    if min_rt and min_rt != "none":
+        allowed_rt = [k for k, v in _REASONING_RANKS.items() if v >= _REASONING_RANKS[min_rt]]
+        query = query.filter(LLMMetadata.reasoning_type.in_(allowed_rt))
 
-    if "tool_calling" in constraints and constraints["tool_calling"]:
-        query = query.filter(LLMMetadata.tool_calling != "none")
+    min_tc = constraints.get("min_tool_calling")
+    if min_tc and min_tc != "none":
+        allowed_tc = [k for k, v in _TOOL_CALLING_RANKS.items() if v >= _TOOL_CALLING_RANKS[min_tc]]
+        query = query.filter(LLMMetadata.tool_calling.in_(allowed_tc))
 
     if "min_speed_class" in constraints and constraints["min_speed_class"] == "medium":
         query = query.filter(

@@ -5,13 +5,23 @@ from typing import Any
 _DEPLOYMENT_MAP = {
     "Any": "any",
     "Cloud API": "cloud",
-    "Local / Open Weights": "local",
+    "Open Weights": "local",
 }
 
 _SPEED_MAP = {
-    "Fast only": "fast",
-    "Balanced+": "medium",
-    "Any/Slow+": None,
+    "Fast": "fast",
+    "Medium+": "medium",
+    "Any": None,
+}
+
+_REASONING_MAP = {
+    "Standard+": "standard",
+    "Native CoT": "native cot",
+}
+
+_TOOL_CALLING_MAP = {
+    "Standard+": "standard",
+    "Agentic": "agentic",
 }
 
 
@@ -22,8 +32,8 @@ def sidebar_to_constraints(sidebar: dict[str, Any]) -> dict[str, Any]:
         "modality_input": [m.lower() for m in sidebar.get("Inputs", ["text"])],
         "modality_output": [m.lower() for m in sidebar.get("Outputs", ["text"])],
         "deployment": _DEPLOYMENT_MAP.get(sidebar.get("Deployment", "Any"), "any"),
-        "reasoning_type": "standard" if sidebar.get("Reasoning") else "none",
-        "require_tool_calling": bool(sidebar.get("Tool Calling")),
+        "min_reasoning_type": _REASONING_MAP.get(sidebar.get("Reasoning", "Any")),
+        "min_tool_calling": _TOOL_CALLING_MAP.get(sidebar.get("Tool Calling", "Any")),
         "min_speed_class": _SPEED_MAP.get(sidebar.get("Speed", "Any/Slow+"), None),
         "balanced_perf_weight": sidebar.get("Perf vs Cost", 50) / 100,
         "budget_perf_weight": sidebar.get("Budget Profile", 20) / 100,

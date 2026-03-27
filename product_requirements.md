@@ -438,7 +438,7 @@ The system employs a dual-channel ingestion approach to build a comprehensive da
     - `[ ] Reasoning Model`: Filters for `is_reasoning_model=true` (e.g., o1, R1). Default is `false` (i.e. any model / no filter).
     - `[ ] Tool Calling`: Filters for `has_tool_calling=true`. Default is `false` (i.e. any model / no filter).
 5.  **Minimum speed (Segmented Control):**
-    - Options: `Any/Slow+` | `Medium+` | `Fast only`
+    - Options: `Any` | `Medium+` | `Fast`
     - *Hint text:* "Filters models by expected throughput class. TPS can vary by provider/hardware."
 
 #### B. Chat Input
